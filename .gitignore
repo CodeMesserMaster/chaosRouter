@@ -18,3 +18,4 @@ dist/
 debug_*.py
 inspect_board.py
 *.do
+build/chaosRouter/

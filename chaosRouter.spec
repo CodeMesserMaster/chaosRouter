@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 from PyInstaller.utils.hooks import copy_metadata
 
-datas = []
+datas = [('chaosrouter/assets', 'chaosrouter/assets')]
 binaries = []
 hiddenimports = ['matplotlib.backends.backend_agg']
 datas += copy_metadata('numba')
@@ -46,6 +46,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['chaosrouter\\assets\\icon.ico'],
 )
 coll = COLLECT(
     exe,
