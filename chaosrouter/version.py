@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # The update server will later live at a real location; the GUI treats a
 # failed lookup as "no update information available", never as an error.
@@ -9,6 +9,17 @@ UPDATE_URL = "https://chaosrouter.org/latest.json"  # placeholder endpoint
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.1.1",
+        "2026-07-03",
+        [
+            "GUI polish: instant unrouted-board preview on file pick, "
+            "Save result button (.ses + board image), app icon "
+            "(order-out-of-chaos), Windows taskbar identity fix.",
+            "Docs: Guided-Chaos Routing technology description in README "
+            "and About dialog.",
+        ],
+    ),
     (
         "0.1.0",
         "2026-07-03",
