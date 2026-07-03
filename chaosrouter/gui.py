@@ -516,13 +516,25 @@ class Main(QMainWindow):
 def main():
     from PySide6.QtGui import QIcon
 
+    if sys.platform == "win32":
+        # give the process its own taskbar identity, else Windows groups
+        # the window under a generic host id and shows a default icon
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            f"CodeMesserMaster.chaosRouter.{__version__}"
+        )
+
     app = QApplication(sys.argv)
     app.setStyleSheet(QSS)
     app.setApplicationName(APP_NAME)
-    icon = os.path.join(os.path.dirname(__file__), "assets", "icon_512.png")
-    if os.path.isfile(icon):
-        app.setWindowIcon(QIcon(icon))
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon_512.png")
+    icon = QIcon(icon_path) if os.path.isfile(icon_path) else None
+    if icon:
+        app.setWindowIcon(icon)
     win = Main()
+    if icon:
+        win.setWindowIcon(icon)
     win.show()
     sys.exit(app.exec())
 
