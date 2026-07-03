@@ -483,9 +483,14 @@ class Main(QMainWindow):
 
 
 def main():
+    from PySide6.QtGui import QIcon
+
     app = QApplication(sys.argv)
     app.setStyleSheet(QSS)
     app.setApplicationName(APP_NAME)
+    icon = os.path.join(os.path.dirname(__file__), "assets", "icon_512.png")
+    if os.path.isfile(icon):
+        app.setWindowIcon(QIcon(icon))
     win = Main()
     win.show()
     sys.exit(app.exec())

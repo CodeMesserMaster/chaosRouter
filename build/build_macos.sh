@@ -5,6 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 pyinstaller --noconfirm --clean --windowed --name chaosRouter \
+    --icon chaosrouter/assets/icon.icns \
+    --add-data "chaosrouter/assets:chaosrouter/assets" \
     --collect-submodules chaosrouter \
     --collect-all numba --collect-all llvmlite \
     --copy-metadata numba --copy-metadata llvmlite \

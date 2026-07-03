@@ -6,6 +6,8 @@ $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
 
 pyinstaller --noconfirm --clean --windowed --name chaosRouter `
+    --icon chaosrouter\assets\icon.ico `
+    --add-data "chaosrouter\assets;chaosrouter\assets" `
     --collect-submodules chaosrouter `
     --collect-all numba --collect-all llvmlite `
     --copy-metadata numba --copy-metadata llvmlite `

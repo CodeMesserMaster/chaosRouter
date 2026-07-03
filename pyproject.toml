@@ -29,3 +29,6 @@ chaosrouter-gui = "chaosrouter.gui:main"
 
 [tool.setuptools]
 packages = ["chaosrouter"]
+
+[tool.setuptools.package-data]
+chaosrouter = ["assets/*"]
