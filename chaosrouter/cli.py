@@ -24,6 +24,11 @@ def main():
     ap.add_argument("--step", type=float, default=4.0, help="grid step, mil")
     ap.add_argument("--fillet", type=float, default=25.0, help="max fillet radius, mil")
     ap.add_argument("--no-drc", action="store_true")
+    ap.add_argument(
+        "--method", choices=("chaos", "pathfinder"), default="chaos",
+        help="routing method: guided-chaos (default) or FPGA-style "
+             "pathfinder negotiated congestion",
+    )
     ap.add_argument("--stream", action="store_true", help="emit live copper events")
     ap.add_argument(
         "--strict-width", action="store_true",
@@ -74,6 +79,7 @@ def main():
         on_add=on_add,
         on_rip=on_rip,
         strict_width=args.strict_width,
+        method=args.method,
         avoid_padstacks=(
             () if args.allow_all_vias
             else tuple(args.avoid_via) if args.avoid_via else ("inPadVia",)

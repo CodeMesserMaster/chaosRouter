@@ -26,6 +26,7 @@ def run_pipeline(
     include_geometry: bool = False,
     strict_width: bool = False,
     avoid_padstacks=("inPadVia",),
+    method: str = "chaos",
 ) -> dict:
     """Route a DSN end to end. `progress(line: str)` receives log lines;
     `on_add`/`on_rip` receive live copper events (for GUI animation).
@@ -63,7 +64,12 @@ def run_pipeline(
                 f"failed={len(res.failed)} vias={len(res.vias)}"
             )
 
-    result = router.route_all(progress=rp)
+    if method == "pathfinder":
+        from .pathfinder import route_all_pathfinder
+
+        result = route_all_pathfinder(router, progress=rp)
+    else:
+        result = router.route_all(progress=rp)
     t_route = time.time() - t0
     say(
         f"routing done: {result.routed_edges} connections, "

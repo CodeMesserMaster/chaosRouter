@@ -83,6 +83,9 @@ class Router:
         # via padstacks the target CAD mishandles on SES import (DipTrace
         # blows up "inPadVia"); routing simply never places them
         self.avoid_padstacks = avoid_padstacks
+        # pathfinder mode: per-layer fine-grid penalty attracting the
+        # search toward a negotiated corridor (None = off)
+        self._corridor_bias = None
         self.result = RouteResult()
         import threading
 
@@ -141,6 +144,9 @@ class Router:
             if self.result.failed:
                 self._shake(progress)  # endgame reshuffles; shake the rest
         return self.result
+
+    def set_corridor_bias(self, bias):
+        self._corridor_bias = bias
 
     # ---------------- stochastic shaker ---------------------------------
     SHAKE_ROUNDS = 60
@@ -1344,6 +1350,12 @@ class Router:
                 cong[li] = np.where(
                     neck_zone & (d < req), (req - d) * 0.6, 0.0
                 ).astype(np.float32)
+        if self._corridor_bias is not None:
+            # pathfinder mode: attract the search to the negotiated corridor
+            for li, layer in enumerate(ws.layers):
+                b = self._corridor_bias.get(layer)
+                if b is not None:
+                    cong[li] += b[y0 : y1 + 1, x0 : x1 + 1]
 
         layer_stride = wy * wx
         start_states = np.array(

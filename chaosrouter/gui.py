@@ -18,7 +18,7 @@ from PySide6.QtGui import (
     QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QPolygonF,
 )
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
     QScrollArea, QTabWidget, QVBoxLayout, QWidget,
@@ -298,6 +298,13 @@ class Main(QMainWindow):
         pl.addWidget(self.out_edit)
 
         grid = QGridLayout()
+        grid.addWidget(QLabel("Method"), 2, 0)
+        self.method_combo = QComboBox()
+        self.method_combo.addItems(["Guided-Chaos (default)", "PathFinder (experimental)"])
+        self.method_combo.setCurrentIndex(
+            1 if self.settings.value("method", "chaos") == "pathfinder" else 0
+        )
+        grid.addWidget(self.method_combo, 2, 1)
         grid.addWidget(QLabel("Grid step (mil)"), 0, 0)
         self.step_spin = QDoubleSpinBox()
         self.step_spin.setRange(1.0, 20.0)
@@ -433,6 +440,8 @@ class Main(QMainWindow):
         ]
         if self.strict_chk.isChecked():
             args.append("--strict-width")
+        if self.method_combo.currentIndex() == 1:
+            args += ["--method", "pathfinder"]
         if getattr(sys, "frozen", False):
             return sys.executable, args
         launcher = os.path.join(
@@ -453,6 +462,10 @@ class Main(QMainWindow):
         self.settings.setValue("step", self.step_spin.value())
         self.settings.setValue("fillet", self.fillet_spin.value())
         self.settings.setValue("strict", self.strict_chk.isChecked())
+        self.settings.setValue(
+            "method",
+            "pathfinder" if self.method_combo.currentIndex() == 1 else "chaos",
+        )
         out_base = os.path.join(
             os.path.dirname(dsn), self.out_edit.text().strip() or "routed"
         )
