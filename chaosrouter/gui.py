@@ -72,6 +72,34 @@ QGraphicsView {{ background: {BG}; border: none; border-radius: 10px; }}
 
 
 # ---------------------------------------------------------------- worker
+class PreviewWorker(QThread):
+    """Render the unrouted board (pads + outline + ratsnest) on file pick."""
+
+    ok = Signal(str, str)  # png path, board summary
+    fail = Signal(str)
+
+    def __init__(self, dsn: str):
+        super().__init__()
+        self.dsn = dsn
+
+    def run(self):
+        try:
+            import tempfile
+
+            from . import load_dsn
+            from .viz import draw_board
+
+            board = load_dsn(self.dsn)
+            png = os.path.join(tempfile.gettempdir(), "chaosrouter_preview.png")
+            draw_board(
+                board, png,
+                title=f"{os.path.basename(self.dsn)} — unrouted",
+            )
+            self.ok.emit(png, board.stats())
+        except Exception as e:
+            self.fail.emit(str(e))
+
+
 class RouteWorker(QThread):
     line = Signal(str)
     done = Signal(dict)
@@ -199,6 +227,10 @@ class Main(QMainWindow):
         row = QHBoxLayout()
         self.dsn_edit = QLineEdit()
         self.dsn_edit.setPlaceholderText("pick a .dsn export ...")
+        self.dsn_edit.editingFinished.connect(
+            lambda: os.path.isfile(self.dsn_edit.text().strip())
+            and self.show_preview(self.dsn_edit.text().strip())
+        )
         btn_browse = QPushButton("…")
         btn_browse.setFixedWidth(36)
         btn_browse.clicked.connect(self.pick_dsn)
@@ -273,6 +305,22 @@ class Main(QMainWindow):
             self.dsn_edit.setText(path)
             base = os.path.splitext(os.path.basename(path))[0]
             self.out_edit.setText(base + "_routed")
+            self.show_preview(path)
+
+    def show_preview(self, path: str):
+        """Show the unrouted board in the Board tab as soon as it's picked."""
+        self.status.setText("loading board ...")
+        self.preview = PreviewWorker(path)
+        self.preview.ok.connect(self._preview_ready)
+        self.preview.fail.connect(
+            lambda msg: self.status.setText(f"could not preview: {msg}")
+        )
+        self.preview.start()
+
+    def _preview_ready(self, png: str, summary: str):
+        self.view.set_image(png)
+        self.status.setText(summary)
+        self.tabs.setCurrentWidget(self.view)
 
     def start_route(self):
         dsn = self.dsn_edit.text().strip()
