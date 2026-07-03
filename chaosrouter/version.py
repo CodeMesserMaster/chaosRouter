@@ -1,14 +1,39 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
-# The update server will later live at a real location; the GUI treats a
-# failed lookup as "no update information available", never as an error.
-UPDATE_URL = "https://chaosrouter.org/latest.json"  # placeholder endpoint
+# Update check: the GitHub latest-release API (zero infrastructure).
+# The GUI treats a failed lookup as "no update info", never as an error.
+UPDATE_URL = (
+    "https://api.github.com/repos/CodeMesserMaster/chaosRouter/releases/latest"
+)
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.0",
+        "2026-07-03",
+        [
+            "DipTrace SES import fully solved (measured, not guessed): "
+            "correct coordinate convention; neck-down preserved via the "
+            "class-width import recipe (DipTrace clamps widths UP to class "
+            "but keeps everything above); inPadVia padstack avoided by "
+            "default (DipTrace imports it oversized); T-junctions converted "
+            "to exact endpoint meetings so no phantom ratsnest remains.",
+            "Live routing animation: the GUI board view is fully vector and "
+            "draws copper as the routing subprocess streams it; instant "
+            "unrouted preview on file pick; Cancel button; drag & drop; "
+            "settings persistence.",
+            "KiCad dialect groundwork: unit scaling (mil/um/mm), lowercase "
+            "pcb root, length-rule scaling.",
+            "Test suite (pytest, synthetic boards: units, routing, walls, "
+            "diff pairs, SES) + CI test workflow on Ubuntu and Windows.",
+            "True-scale board rendering (the old renderer drew copper at "
+            "roughly half width and misled width judgements).",
+            "Update check now queries the GitHub latest-release API.",
+        ],
+    ),
     (
         "0.1.1",
         "2026-07-03",

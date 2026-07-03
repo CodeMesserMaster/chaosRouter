@@ -1,5 +1,7 @@
 # chaosRouter
 
+![tests](https://github.com/CodeMesserMaster/chaosRouter/actions/workflows/tests.yml/badge.svg)
+
 **A curved-trace PCB autorouter for Specctra DSN exports — DipTrace and any
 DSN-capable CAD.**
 
@@ -73,6 +75,24 @@ Command line:
 ```bash
 chaosrouter my_board.dsn --out my_board_routed --source GND=U9-2
 ```
+
+## Importing into DipTrace
+
+DipTrace's SES importer has quirks we measured and engineered around:
+
+1. It clamps imported wire widths **up to** the net class width (widths
+   above class import fine). chaosRouter's neck-downs go below class
+   width, so before importing, temporarily set the affected net classes'
+   widths in DipTrace to the *minimum routed width* (the statistics tab
+   shows it, typically 0.2 mm), import the `.ses`, then restore the class
+   widths. Existing copper keeps its imported widths. Alternatively check
+   *Strict class widths* in the GUI (or `--strict-width`) and skip the
+   dance at some routability cost.
+2. The `inPadVia` padstack imports oversized — chaosRouter avoids placing
+   it by default (`--allow-all-vias` re-enables for other CADs).
+3. Wire junctions are exported as exact endpoint meetings (T-junctions
+   split the host wire), so DipTrace's connectivity recognizes every
+   routed net — no phantom ratsnest.
 
 ## Building installers
 

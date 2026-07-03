@@ -235,7 +235,15 @@ class Workspace:
         return True
 
     # ---- dynamic obstacles ----------------------------------------------
+    # optional live-event hooks (set by the pipeline for GUI streaming):
+    # on_add("trace", net, layer, coords, width) / ("via", net, x, y, dia)
+    # and on_rip(net)
+    on_add = None
+    on_rip = None
+
     def add_trace(self, net: str, layer: str, coords, width: float):
+        if self.on_add:
+            self.on_add("trace", net, layer, coords, width)
         line = LineString(coords)
         geom = line.buffer(width / 2, quad_segs=8)
         with self.lock:
@@ -252,6 +260,8 @@ class Workspace:
             self._patch_exempt(net, geom, [layer])
 
     def add_via(self, net: str, x: float, y: float, diameter: float):
+        if self.on_add:
+            self.on_add("via", net, x, y, diameter)
         pt = Point(x, y)
         geom = pt.buffer(diameter / 2, quad_segs=8)
         with self.lock:
@@ -270,6 +280,8 @@ class Workspace:
     def remove_net_wiring(self, net: str):
         """Rip a net's traces and vias (pads stay). Owner cells they covered
         are rebuilt from the remaining exact copper registry."""
+        if self.on_rip:
+            self.on_rip(net)
         with self.lock:
             removed = []
             for layer in self.layers:

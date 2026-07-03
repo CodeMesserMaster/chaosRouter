@@ -67,6 +67,8 @@ class Router:
         via_cost: float = 150.0,
         edt_margin: float = 1.0,
         power_sources: dict | None = None,
+        strict_width: bool = False,
+        avoid_padstacks: frozenset = frozenset(),
     ):
         self.board = board
         self.ws = ws
@@ -74,6 +76,13 @@ class Router:
         self.via_cost = via_cost
         self.edt_margin = edt_margin  # in grid-step units, covers quantization
         self.power_sources = power_sources or {}
+        # strict_width: never route below class width (DipTrace's SES import
+        # normalizes wire widths back to the class width, so any sub-width
+        # neck would be force-widened into a clearance violation there)
+        self.strict_width = strict_width
+        # via padstacks the target CAD mishandles on SES import (DipTrace
+        # blows up "inPadVia"); routing simply never places them
+        self.avoid_padstacks = avoid_padstacks
         self.result = RouteResult()
         import threading
 
@@ -961,8 +970,8 @@ class Router:
         )
         best = None
         for name in allowed:
-            # inPadVia is just the class's smallest via — using it OUTSIDE
-            # pads is legal; via-in-pad is prevented by exact_via_ok anyway
+            if name in self.avoid_padstacks:
+                continue
             ps = self.board.padstacks.get(name)
             if not ps or not ps.shapes:
                 continue
@@ -1121,6 +1130,8 @@ class Router:
                 changed = True
 
     def neck_width(self, net: Net) -> float:
+        if self.strict_width:
+            return net.width
         rule = net.net_class.rules.get("neck_down_width") if net.net_class else None
         return float(rule[0]) if rule else self.board.default_width
 

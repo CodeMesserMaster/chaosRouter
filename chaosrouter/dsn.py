@@ -17,8 +17,29 @@ from .model import (
 )
 
 
+# mil per DSN coordinate unit — set by load_dsn from (unit ...) /
+# (resolution ...). DipTrace exports mil; KiCad exports um.
+_SCALE = 1.0
+
+_UNIT_TO_MIL = {
+    "inch": 1000.0,
+    "mil": 1.0,
+    "cm": 393.7007874,
+    "mm": 39.37007874,
+    "um": 0.03937007874,
+}
+
+# net-class rule values that are lengths and must be unit-scaled
+_LENGTH_RULES = {
+    "width", "clearance", "neck_down_width", "neck_down_gap",
+    "diffpair_line_width", "diffpair_gap", "gap", "edge_primary_gap",
+    "max_uncoupled_length", "edge_coupled_tolerance_minus",
+    "edge_coupled_tolerance_plus", "phase_tolerance_length",
+}
+
+
 def _f(tok: str) -> float:
-    return float(tok)
+    return float(tok) * _SCALE
 
 
 def _parse_shape(shape_node: list) -> PadShape | None:
@@ -51,10 +72,19 @@ def _parse_shape(shape_node: list) -> PadShape | None:
 
 
 def load_dsn(path: str) -> Board:
+    global _SCALE
     with open(path, encoding="utf-8", errors="replace") as fh:
         root = sexp.parse(fh.read())
-    if root[0] != "PCB":
+    if str(root[0]).lower() != "pcb":
         raise ValueError(f"not a DSN PCB file: {root[0]}")
+
+    # units: coordinates are expressed in (unit X), falling back to the
+    # unit named by (resolution X n). DipTrace exports mil, KiCad um.
+    _SCALE = 1.0
+    unit_node = sexp.find(root, "unit")
+    res_node = sexp.find(root, "resolution")
+    unit = (unit_node[1] if unit_node else res_node[1] if res_node else "mil")
+    _SCALE = _UNIT_TO_MIL.get(str(unit).lower(), 1.0)
 
     board = Board()
 
@@ -173,6 +203,11 @@ def load_dsn(path: str) -> Board:
                     nc.width = _f(sub[1])
                 elif sub[0] == "clearance" and len(sub) == 2:
                     nc.clearance = _f(sub[1])
+                elif sub[0] in _LENGTH_RULES:
+                    # unit-scale length-valued rules; consumers read floats
+                    nc.rules[sub[0]] = [
+                        _f(t) if not isinstance(t, list) else t for t in sub[1:]
+                    ]
                 else:
                     nc.rules[sub[0]] = sub[1:]
         board.classes[name] = nc

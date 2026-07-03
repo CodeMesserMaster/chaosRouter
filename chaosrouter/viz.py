@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from shapely.geometry import LineString
 import matplotlib
 
 matplotlib.use("Agg")
@@ -87,14 +88,22 @@ def draw_board(
             PatchCollection(patches, facecolor=color, edgecolor="none", alpha=0.9, zorder=2 + zi)
         )
         if traces:
+            # TRUE-SCALE widths: buffer the centerline by width/2 so the
+            # image never under-draws copper (a points-based linewidth used
+            # to show traces at ~half size and mislead width judgements)
+            tpatches = []
             for coords, width, _net in traces.get(layer, []):
-                arr = np.asarray(coords)
-                ax.plot(
-                    arr[:, 0], arr[:, 1],
-                    color=color, lw=max(0.5, width / 6), alpha=0.85,
-                    solid_capstyle="round", solid_joinstyle="round",
+                try:
+                    poly = LineString(coords).buffer(width / 2, quad_segs=6)
+                    tpatches.extend(_geom_patches(poly))
+                except Exception:
+                    continue
+            ax.add_collection(
+                PatchCollection(
+                    tpatches, facecolor=color, edgecolor="none", alpha=0.85,
                     zorder=2 + len(layer_order) + zi,
                 )
+            )
 
     if vias:
         for x, y, d in vias:

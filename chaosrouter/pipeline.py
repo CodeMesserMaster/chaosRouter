@@ -21,8 +21,14 @@ def run_pipeline(
     sources: dict | None = None,
     drc: bool = True,
     progress=None,
+    on_add=None,
+    on_rip=None,
+    include_geometry: bool = False,
+    strict_width: bool = False,
+    avoid_padstacks=("inPadVia",),
 ) -> dict:
-    """Route a DSN end to end. `progress(line: str)` receives log lines.
+    """Route a DSN end to end. `progress(line: str)` receives log lines;
+    `on_add`/`on_rip` receive live copper events (for GUI animation).
     Returns a dict of statistics and output paths."""
 
     def say(line: str):
@@ -43,7 +49,12 @@ def run_pipeline(
     say(board.stats())
 
     ws = Workspace(board, step=step)
-    router = Router(board, ws, power_sources=sources or {})
+    ws.on_add = on_add
+    ws.on_rip = on_rip
+    router = Router(
+        board, ws, power_sources=sources or {}, strict_width=strict_width,
+        avoid_padstacks=frozenset(avoid_padstacks or ()),
+    )
 
     def rp(i, n, name, res):
         if (isinstance(i, int) and n and (i % 10 == 0 or i == n)) or n == 0:
@@ -59,6 +70,7 @@ def run_pipeline(
         f"{len(result.failed)} failed, {len(result.vias)} vias ({t_route:.0f}s)"
     )
 
+    ws.on_add = ws.on_rip = None  # style passes re-register copper
     pruned = router.prune_open_stubs()
     grafts = router.beautify_exits()
     fat = router.fatten_pad_entries()
@@ -126,10 +138,25 @@ def run_pipeline(
     b = board.outline.bounds
     total = result.routed_edges + len(result.failed)
 
+    geometry = None
+    if include_geometry:
+        geometry = {
+            "traces": [
+                [t.net, t.layer, [[round(x, 2), round(y, 2)] for x, y in t.coords],
+                 round(t.width, 3)]
+                for t in result.traces
+            ],
+            "vias": [
+                [v.net, round(v.x, 2), round(v.y, 2), round(v.diameter, 2)]
+                for v in result.vias
+            ],
+        }
+
     return {
         "dsn": dsn_path,
         "png": png,
         "ses": ses,
+        "geometry": geometry,
         "board": {
             "components": len({p.pin_id.split("-")[0] for p in board.pads.values()}),
             "pads": len(board.pads),
