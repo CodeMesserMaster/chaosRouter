@@ -52,7 +52,16 @@ class Negotiator:
         self.net_cells: dict[str, list] = {}   # net -> [(li, iy, ix), ...] flat arrays
         self.net_paths: dict[str, list] = {}   # net -> list of cell paths (edges)
         self._pad_dist_cache: dict[str, np.ndarray] = {}
+        self._offsets_cache: dict[int, np.ndarray] = {}
         self._pad_masks()
+        # pad-escape zones: cells near ANY pad have elastic capacity —
+        # neighboring pins' escapes legitimately share coarse cells there,
+        # and the exact realization layer resolves them. Counting them as
+        # conflicts poisons negotiation (v1 plateaued on exactly this).
+        self.pad_zone = np.zeros((self.nl, self.ny, self.nx), dtype=bool)
+        for li in range(self.nl):
+            pad_mask = self.pad_owner[li] >= 0
+            self.pad_zone[li] = distance_field(pad_mask, self.step) <= 24.0
 
     # ---- static geometry -------------------------------------------------
     def to_cell(self, x, y):
@@ -108,14 +117,60 @@ class Negotiator:
         self._pad_dist_cache[net_name] = out
         return out
 
+    def _disk_offsets(self, r_cells: int) -> np.ndarray:
+        offs = self._offsets_cache.get(r_cells)
+        if offs is None:
+            pts = [
+                (dy, dx)
+                for dy in range(-r_cells, r_cells + 1)
+                for dx in range(-r_cells, r_cells + 1)
+                if dy * dy + dx * dx <= r_cells * r_cells
+            ]
+            offs = np.array(pts, dtype=np.int32)
+            self._offsets_cache[r_cells] = offs
+        return offs
+
+    def _corridor_cells(self, net, paths):
+        """Width-aware footprint: every coarse cell the net's copper will
+        actually occupy (path dilated by width/2+clearance, via discs on
+        all layers). Returns (li, iy, ix) index arrays."""
+        # each net carries HALF the clearance gap: two legally adjacent
+        # corridors then just touch instead of falsely conflicting
+        req = net.width / 2 + net.clearance / 2
+        r = max(0, int(round(req / self.step)))
+        offs = self._disk_offsets(r)
+        lis, iys, ixs = [], [], []
+        via_r = max(1, int(round((19.7 / 2 + net.clearance) / self.step)))
+        voffs = self._disk_offsets(via_r)
+        for path in paths:
+            arr = np.array(path, dtype=np.int32)
+            for dy, dx in offs:
+                lis.append(arr[:, 0])
+                iys.append(arr[:, 1] + dy)
+                ixs.append(arr[:, 2] + dx)
+            # vias occupy every layer
+            for k in range(1, len(path)):
+                if path[k][0] != path[k - 1][0]:
+                    vy, vx = path[k][1], path[k][2]
+                    for li in range(self.nl):
+                        lis.append(np.full(len(voffs), li, dtype=np.int32))
+                        iys.append(vy + voffs[:, 0])
+                        ixs.append(vx + voffs[:, 1])
+        if not lis:
+            return (np.empty(0, np.int32),) * 3
+        li = np.concatenate(lis)
+        iy = np.clip(np.concatenate(iys), 0, self.ny - 1)
+        ix = np.clip(np.concatenate(ixs), 0, self.nx - 1)
+        return li, iy, ix
+
     # ---- negotiation ------------------------------------------------------
-    def _route_net_edges(self, net, pres_fac: float):
-        """Route all Prim edges of a net on the coarse grid; returns cell
-        paths and the set of cells used."""
+    def _route_net_edges(self, net, pres_fac: float, usage_other):
+        """Route all Prim edges of a net on the coarse grid against a
+        usage snapshot of the OTHER nets; returns the cell paths."""
         ws_step = self.step
         pads = self.board.pads_of_net(net)
         if len(pads) < 2:
-            return [], []
+            return []
         req = net.width / 2 + net.clearance
         dist = self._foreign_pad_dist(net.name).astype(np.float32)
         nid = self.net_index[net.name]
@@ -124,11 +179,15 @@ class Negotiator:
             trav[li] = (dist[li] >= req) | (self.pad_owner[li] == nid)
             trav[li] &= self.pad_owner[li] != -2
 
-        # congestion cost: history + present usage of other nets
-        cong = self.HIST_FAC * self.history * ws_step
-        usage = self.usage.astype(np.float32)
-        cong += pres_fac * np.maximum(usage, 0.0) * ws_step
-        cong = cong.astype(np.float32)
+        # congestion cost: history + present sharing, but NOT inside pad
+        # escape zones (sharing there is legitimate; exact realization
+        # resolves it)
+        cong = (
+            self.HIST_FAC * self.history
+            + pres_fac * np.maximum(usage_other.astype(np.float32), 0.0)
+        ) * ws_step
+        cong[self.pad_zone] = 0.0
+        cong = np.ascontiguousarray(cong, dtype=np.float32)
 
         pts = np.array([(p.x, p.y) for p in pads])
         dmat = np.hypot(pts[:, 0, None] - pts[None, :, 0],
@@ -148,7 +207,6 @@ class Negotiator:
         connected = [start]
         remaining = set(range(len(pads))) - {start}
         paths = []
-        cells: list = []
         via_ok = np.ones((self.ny, self.nx), dtype=bool)
         for li in range(self.nl):
             via_ok &= self.pad_owner[li] != -2
@@ -194,32 +252,98 @@ class Negotiator:
             paths.append(path)
             for li, iy, ix in path:
                 target[li, iy, ix] = True
-                cells.append((li, iy, ix))
             centers.append(path[0])
             add_pad(p)
-        return paths, cells
+        return paths
 
     def negotiate(self, nets) -> dict[str, list]:
-        """Iterate until no coarse cell is claimed by more than one net.
-        Returns net -> list of cell paths (the corridors)."""
+        """Iterate until no coarse cell outside pad zones is claimed by
+        more than one net (Jacobi-parallel across nets: every net re-routes
+        against the previous iteration's usage snapshot, so iterations run
+        across all cores). Stops early on a plateau."""
+        import os
+        from concurrent.futures import ThreadPoolExecutor
+
         say = self.progress or (lambda s: None)
         order = list(nets)
+        workers = max(4, (os.cpu_count() or 8) - 2)
+        best_over = float("inf")
+        stall = 0
+
+        def work(args):
+            net, pres = args
+            own = self.net_cells.get(net.name)
+            usage_other = self.usage
+            if own is not None and len(own[0]):
+                usage_other = self.usage.copy()
+                np.subtract.at(usage_other, own, 1)
+            paths = self._route_net_edges(net, pres, usage_other)
+            cells = self._corridor_cells(net, paths)
+            # dedupe: a cell counts once per net regardless of dilation
+            stride = self.ny * self.nx
+            flat = np.unique(cells[0] * stride + cells[1] * self.nx + cells[2])
+            li, rem = np.divmod(flat, stride)
+            iy, ix = np.divmod(rem, self.nx)
+            return net.name, paths, (li, iy, ix)
+
+        import random
+
+        rng = random.Random(20260703)
+        net_by_name = {n.name: n for n in order}
+
+        # iteration 1: everyone routes in parallel (empty board, no usage)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(work, ((n, 0.0) for n in order)))
+        self.usage[:] = 0
+        for name, paths, cells in results:
+            self.net_paths[name] = paths
+            self.net_cells[name] = cells
+            np.add.at(self.usage, cells, 1)
+
         for it in range(self.MAX_ITERS):
-            pres = self.PRES_BASE * (1.6 ** it) if it else 0.0
-            for net in order:
-                # remove own usage, re-route with penalties
-                for li, iy, ix in self.net_cells.get(net.name, ()):
-                    self.usage[li, iy, ix] -= 1
-                paths, cells = self._route_net_edges(net, pres)
-                self.net_paths[net.name] = paths
-                self.net_cells[net.name] = cells
-                for li, iy, ix in cells:
-                    self.usage[li, iy, ix] += 1
-            over = int((self.usage > 1).sum())
-            say(f"  pathfinder iter {it + 1}: {over} over-subscribed cells")
+            conflict = (self.usage > 1) & ~self.pad_zone
+            over = int(conflict.sum())
+            # which nets touch contested cells?
+            guilty = []
+            for name, cells in self.net_cells.items():
+                if len(cells[0]) and conflict[cells].any():
+                    guilty.append(name)
+            say(f"  pathfinder iter {it + 1}: {over} contested cells, "
+                f"{len(guilty)} nets to renegotiate")
             if over == 0:
                 break
-            self.history += (self.usage > 1).astype(np.float32)
+            if over < best_over - 4:
+                best_over = over
+                stall = 0
+            else:
+                stall += 1
+                if stall >= 4:
+                    say("  pathfinder: contention plateau — proceeding to "
+                        "realization")
+                    break
+            self.history += conflict.astype(np.float32)
+            # ONLY conflicted nets re-route, sequentially with live usage
+            # (Gauss-Seidel: no oscillation), innocent nets keep corridors
+            pres = self.PRES_BASE * (1.5 ** it)
+            rng.shuffle(guilty)
+            for name in guilty:
+                own = self.net_cells.get(name)
+                if own is not None and len(own[0]):
+                    np.subtract.at(self.usage, own, 1)
+                net = net_by_name[name]
+                usage_other = self.usage
+                paths = self._route_net_edges(net, pres, usage_other)
+                cells = self._corridor_cells(net, paths)
+                stride = self.ny * self.nx
+                flat = np.unique(
+                    cells[0] * stride + cells[1] * self.nx + cells[2]
+                )
+                li, rem = np.divmod(flat, stride)
+                iy, ix = np.divmod(rem, self.nx)
+                cells = (li, iy, ix)
+                self.net_paths[name] = paths
+                self.net_cells[name] = cells
+                np.add.at(self.usage, cells, 1)
         return self.net_paths
 
 
