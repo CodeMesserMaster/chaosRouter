@@ -1,0 +1,20 @@
+# user board designs and routing outputs — never publish
+*.dsn
+*.ses
+*.pkl
+*.png
+*.gif
+
+# python
+__pycache__/
+*.pyc
+build/dist/
+build/work/
+dist/
+*.spec.bak
+.venv/
+
+# local debug / scratch scripts
+debug_*.py
+inspect_board.py
+*.do
