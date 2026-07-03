@@ -7,6 +7,27 @@ chaosRouter routes with *curves only*: every corner is a tangent arc, every
 pad entry is a teardrop, and the result re-imports into your CAD as a
 standard Specctra `.ses` session file.
 
+## Guided-Chaos Routing
+
+The technology behind chaosRouter rests on three pillars:
+
+1. **Optimistic grid, exact judge** — the search grid is deliberately
+   permissive: a fast guide, never the truth. Every candidate trace, via
+   and arc is adjudicated against exact copper geometry (true-circle
+   clearance math) before acceptance. Using both worlds is why chaosRouter
+   threads 0.5 mm pin fields that conservative grid routers give up on.
+2. **Escalating controlled chaos** — completion comes from a ladder of
+   increasingly bold perturbation, each rung transactional with exact
+   rollback: deterministic rip-up with blocker attribution → Monte-Carlo
+   neighborhood shaking → an incremental-eviction *endgame* that identifies
+   the physical copper sealing a failing connection, moves exactly that,
+   and surgically stitches the missing edge. Deterministic where possible,
+   stochastic where useful, never destructive.
+3. **Curvilinear copper** — curves are not a cosmetic post-filter: tangent
+   arc fillets, teardrop pad/via entries holding full pad width from the
+   pad center, 0.1 mm graded neck-downs — every piece exact-clearance
+   verified, so the styled board is as legal as the raw one.
+
 ## Highlights
 
 - **Curves only** — tangent-arc fillets everywhere; sharp corners are treated

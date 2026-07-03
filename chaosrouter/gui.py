@@ -179,6 +179,17 @@ class AboutDialog(QDialog):
         lay.addWidget(head)
         lay.addWidget(QLabel(f"version {__version__} — curved-trace autorouter "
                              f"for any DSN-exporting CAD"))
+        tech = QLabel(
+            "<b>Guided-Chaos Routing</b>: optimistic grid search judged by "
+            "exact geometry (true-circle clearance math), an escalating "
+            "ladder of controlled perturbation — rip-up with blocker "
+            "attribution, Monte-Carlo shaking, and a surgical eviction "
+            "endgame — plus fully verified curvilinear styling: tangent-arc "
+            "fillets, teardrop entries, graded 0.1 mm neck-downs."
+        )
+        tech.setWordWrap(True)
+        tech.setStyleSheet(f"color: {MUTED}; padding: 6px 0;")
+        lay.addWidget(tech)
         hist = QPlainTextEdit()
         hist.setReadOnly(True)
         txt = []
