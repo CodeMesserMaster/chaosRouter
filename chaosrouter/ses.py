@@ -148,7 +148,8 @@ def _unify_net_wires(traces, pads, vias=()):
     return out
 
 
-def write_ses(path: str, dsn_path: str, board, result):
+def write_ses(path: str, dsn_path: str, board, result, via_map=None):
+    via_map = via_map or {}
     design = os.path.basename(dsn_path)
     lines = []
     a = lines.append
@@ -177,22 +178,30 @@ def write_ses(path: str, dsn_path: str, board, result):
     a("      (host_version 0.1)")
     a("    )")
 
-    # padstacks used by vias
-    used_ps = sorted({v.padstack for v in result.vias})
-    a("    (library_out")
-    for ps_name in used_ps:
-        ps = board.padstacks.get(ps_name)
-        a(f"      (padstack {_q(ps_name)}")
-        if ps:
-            for sh in ps.shapes:
-                b = sh.geometry.bounds
-                dia = max(b[2] - b[0], b[3] - b[1])
-                a(f"        (shape")
-                a(f"          (circle {_q(sh.layer)} {_dim(dia)} 0 0)")
-                a("        )")
-        a("        (attach off)")
-        a("      )")
-    a("    )")
+    # Via padstacks: only REDEFINE ones the CAD doesn't already know. Every
+    # padstack that came from the input DSN is native to the CAD — emitting
+    # our own (circle ...) shape for it overrides its true size on import
+    # (this is why "inPadVia" vias imported oversized in DipTrace). We
+    # reference those by name and let the CAD use its own definition.
+    used_ps = sorted({via_map.get(v.padstack, v.padstack) for v in result.vias})
+    unknown = [n for n in used_ps if n not in board.padstacks]
+    if unknown:
+        a("    (library_out")
+        for ps_name in unknown:
+            ps = next(
+                (board.padstacks[k] for k, v in via_map.items()
+                 if v == ps_name and k in board.padstacks), None)
+            a(f"      (padstack {_q(ps_name)}")
+            if ps:
+                for sh in ps.shapes:
+                    b = sh.geometry.bounds
+                    dia = max(b[2] - b[0], b[3] - b[1])
+                    a("        (shape")
+                    a(f"          (circle {_q(sh.layer)} {_dim(dia)} 0 0)")
+                    a("        )")
+            a("        (attach off)")
+            a("      )")
+        a("    )")
 
     a("    (network_out")
     by_net: dict[str, dict] = defaultdict(lambda: {"traces": [], "vias": []})
@@ -221,7 +230,8 @@ def write_ses(path: str, dsn_path: str, board, result):
             a("          )")
             a("        )")
         for v in data["vias"]:
-            a(f"        (via {_q(v.padstack)} {_i(v.x)} {_i(v.y)})")
+            ps_out = via_map.get(v.padstack, v.padstack)
+            a(f"        (via {_q(ps_out)} {_i(v.x)} {_i(v.y)})")
         a("      )")
     a("    )")
     a("  )")

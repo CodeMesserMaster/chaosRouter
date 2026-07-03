@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,23 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.3",
+        "2026-07-03",
+        [
+            "SES import fully correct: stop redefining padstacks the CAD "
+            "already knows (our library_out override was what made vias "
+            "import oversized in DipTrace) — reference them by name so the "
+            "CAD uses its own true sizes. The small 0.4 mm via is allowed "
+            "again (no-via-in-pad stays enforced geometrically), restoring "
+            "100% completion with a correct round-trip.",
+            "New: --via-map OLD=NEW renames padstacks in the SES for CADs "
+            "with different naming; --persist-min N keeps re-shaking with "
+            "fresh seeds until 100% routed or the time budget expires.",
+            "PathFinder v4: cheap negotiation vias (crossings resolve by "
+            "layer change) — new PathFinder best, 704/710.",
+        ],
+    ),
     (
         "0.2.2",
         "2026-07-03",

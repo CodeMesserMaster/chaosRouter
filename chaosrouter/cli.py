@@ -41,6 +41,17 @@ def main():
              "DipTrace imports oversized); pass --allow-all-vias to clear",
     )
     ap.add_argument("--allow-all-vias", action="store_true")
+    ap.add_argument(
+        "--via-map", action="append", default=[], metavar="OLD=NEW",
+        help="rename a via padstack in the SES output (e.g. "
+             "--via-map \"inPadVia=Via 0.4\" so DipTrace maps it to "
+             "its real via style)",
+    )
+    ap.add_argument(
+        "--persist-min", type=float, default=0.0,
+        help="keep re-shaking with fresh seeds up to this many minutes "
+             "until 100%% routed",
+    )
     ap.add_argument("--stats-json", default=None, help="write stats JSON here")
     ap.add_argument(
         "--source", action="append", default=[], metavar="NET=PIN",
@@ -80,10 +91,9 @@ def main():
         on_rip=on_rip,
         strict_width=args.strict_width,
         method=args.method,
-        avoid_padstacks=(
-            () if args.allow_all_vias
-            else tuple(args.avoid_via) if args.avoid_via else ("inPadVia",)
-        ),
+        via_map=dict(m.split("=", 1) for m in args.via_map),
+        persist_seconds=args.persist_min * 60.0,
+        avoid_padstacks=tuple(args.avoid_via) if args.avoid_via else (),
         include_geometry=bool(args.stats_json),
     )
     if args.stats_json:

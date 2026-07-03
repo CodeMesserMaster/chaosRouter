@@ -25,8 +25,10 @@ def run_pipeline(
     on_rip=None,
     include_geometry: bool = False,
     strict_width: bool = False,
-    avoid_padstacks=("inPadVia",),
+    avoid_padstacks=(),
     method: str = "chaos",
+    via_map: dict | None = None,
+    persist_seconds: float = 0.0,
 ) -> dict:
     """Route a DSN end to end. `progress(line: str)` receives log lines;
     `on_add`/`on_rip` receive live copper events (for GUI animation).
@@ -69,7 +71,7 @@ def run_pipeline(
 
         result = route_all_pathfinder(router, progress=rp)
     else:
-        result = router.route_all(progress=rp)
+        result = router.route_all(progress=rp, persist_seconds=persist_seconds)
     t_route = time.time() - t0
     say(
         f"routing done: {result.routed_edges} connections, "
@@ -114,7 +116,7 @@ def run_pipeline(
               f"failed {len(result.failed)}, vias {len(result.vias)}",
     )
     ses = f"{out_base}.ses"
-    write_ses(ses, dsn_path, board, result)
+    write_ses(ses, dsn_path, board, result, via_map=via_map)
     with open(f"{out_base}.pkl", "wb") as fh:
         pickle.dump(
             {

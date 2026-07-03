@@ -114,7 +114,8 @@ class Router:
     MAX_RIPS_PER_NET = 2
 
     def route_all(
-        self, progress=None, rip_up: bool = True, workers: int | None = None
+        self, progress=None, rip_up: bool = True, workers: int | None = None,
+        persist_seconds: float = 0.0,
     ) -> RouteResult:
         import os
 
@@ -143,6 +144,28 @@ class Router:
             self._endgame(progress)
             if self.result.failed:
                 self._shake(progress)  # endgame reshuffles; shake the rest
+            # persistence: the board is routable — keep rolling fresh seeds
+            # through shake+endgame until complete or the budget runs out
+            import time as _t
+
+            t0 = _t.time()
+            attempt = 1
+            while (
+                self.result.failed
+                and persist_seconds > 0
+                and _t.time() - t0 < persist_seconds
+            ):
+                attempt += 1
+                if progress:
+                    progress(
+                        0, 0,
+                        f"persist: attempt {attempt}, "
+                        f"{len(self.result.failed)} failed, "
+                        f"{persist_seconds - (_t.time() - t0):.0f}s left",
+                        self.result,
+                    )
+                self._shake(progress, seed=20260703 + attempt * 7919)
+                self._endgame(progress)
         return self.result
 
     def set_corridor_bias(self, bias):
@@ -152,7 +175,7 @@ class Router:
     SHAKE_ROUNDS = 60
     SHAKE_PATIENCE = 15  # stop after this many consecutive rejections
 
-    def _shake(self, progress=None):
+    def _shake(self, progress=None, seed: int = 20260703):
         """Monte-Carlo local perturbation: when deterministic rip-up stalls,
         rip a random small neighborhood around a failing edge and re-route
         in random order. Keep the new state only if total failures dropped;
@@ -161,7 +184,7 @@ class Router:
 
         from shapely.geometry import box as shp_box
 
-        rng = random.Random(20260703)
+        rng = random.Random(seed)
         rounds = 0
         rejects = 0
         while rounds < self.SHAKE_ROUNDS and rejects < self.SHAKE_PATIENCE:

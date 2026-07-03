@@ -236,7 +236,10 @@ class Negotiator:
             found, parent = astar(
                 trav.reshape(-1), target.reshape(-1), via_ok.reshape(-1),
                 cong.reshape(-1), start_states,
-                self.nl, self.ny, self.nx, self.step, 60.0,
+                # vias are CHEAP during negotiation: crossings are resolved
+                # by layer changes, and pricing vias high forces the planner
+                # to shuffle corridors sideways instead of assigning layers
+                self.nl, self.ny, self.nx, self.step, 15.0,
                 g_ix0, g_ix1, g_iy0, g_iy1,
             )
             if found < 0:
