@@ -273,10 +273,15 @@ class Main(QMainWindow):
         self.go.setObjectName("go")
         self.go.clicked.connect(self.start_route)
         pl.addWidget(self.go)
+        self.save_btn = QPushButton("Save result …")
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self.save_result)
+        pl.addWidget(self.save_btn)
         self.status = QLabel("")
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
         pl.addWidget(self.status)
+        self.last_stats: dict | None = None
 
         pl.addStretch(1)
         row2 = QHBoxLayout()
@@ -358,14 +363,40 @@ class Main(QMainWindow):
 
     def finished(self, stats: dict):
         self.go.setEnabled(True)
+        self.save_btn.setEnabled(True)
+        self.last_stats = stats
         r = stats["routing"]
-        q = stats["quality"]
         self.status.setText(
-            f"done: {r['routed']}/{r['total']} in {r['seconds']:.0f}s"
+            f"done: {r['routed']}/{r['total']} in {r['seconds']:.0f}s — "
+            f"session written to {os.path.basename(stats['ses'])}"
         )
         self.view.set_image(stats["png"])
         self.populate_stats(stats)
         self.tabs.setCurrentWidget(self.view)
+
+    def save_result(self):
+        """Copy the routed session (and board image) wherever the user wants."""
+        if not self.last_stats:
+            return
+        import shutil
+
+        default = os.path.abspath(self.last_stats["ses"])
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save routed session", default,
+            "Specctra session (*.ses);;All files (*)",
+        )
+        if not path:
+            return
+        shutil.copyfile(self.last_stats["ses"], path)
+        png_target = os.path.splitext(path)[0] + ".png"
+        try:
+            shutil.copyfile(self.last_stats["png"], png_target)
+        except OSError:
+            png_target = None
+        self.status.setText(
+            f"saved {os.path.basename(path)}"
+            + (f" + {os.path.basename(png_target)}" if png_target else "")
+        )
 
     # ---- statistics tab ----------------------------------------------
     def populate_stats(self, s: dict):
