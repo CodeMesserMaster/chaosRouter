@@ -149,9 +149,10 @@ class BoardView(QGraphicsView):
         self.net_items: dict[str, list] = {}
         self._loaded = False
         # animation state
-        self._glow_all = []          # (item, base_opacity, phase_offset, breathes)
+        self._glow_all = []          # (item, base_opacity, birth_frame)
         self._fading = []            # [ [group, frame, target], ... ]
         self._phase = 0.0
+        self._frame = 0              # global frame counter for glow ageing
         self._settling = False       # final pass: fade all glow to nothing
         self._settle_f = 0
         self._final_mode = False     # after @CLEAR: draw clean, no glow
@@ -200,44 +201,29 @@ class BoardView(QGraphicsView):
                          p2[0] - h2x, p2[1] - h2y, p2[0], p2[1])
         return path
 
+    GLOW_FADE = 80.0  # frames (~1.3s @60fps) for a trace's glow to fade out
+
     def _tick(self):
-        import math
-        # SETTLE: on the final passes fade every glow layer out to nothing,
-        # then delete it — the finished board is left as clean, crisp traces
-        # (the bright cores) with no glow bloom.
-        if self._settling:
-            self._settle_f += 1
-            hard = self._settle_f >= 10   # guaranteed gone after ~10 frames
-            live = []
-            for it, base, off, br in self._glow_all:
-                try:
-                    if it.scene() is None:
-                        continue
-                    o = it.opacity() * 0.66
-                    if hard or o < 0.02:
-                        self.scene().removeItem(it)
-                        continue
-                    it.setOpacity(o)
-                    live.append((it, base, off, br))
-                except RuntimeError:
-                    continue
-            self._glow_all = live
-            if not live:
-                self._settling = False
-            return
-        # gentle global phase; each trace carries its own spatial offset so
-        # the glow flows across the board as a wave, not a uniform blink
-        self._phase += 0.035
-        p = self._phase
-        sin = math.sin
+        # Each trace's glow fades out over GLOW_FADE frames from its birth, so
+        # the glow TRAILS the routing front like a wave and never accumulates
+        # into a board-wide smear; once faded the glow layer is deleted and
+        # the clean bright core remains.
+        self._frame += 1
+        f = self._frame
+        fade = self.GLOW_FADE
         live = []
-        for it, base, off, br in self._glow_all:
+        for it, base, birth in self._glow_all:
             try:
                 if it.scene() is None:
                     continue
-                if br:  # shallow, smooth breath (0.78..1.0 of base)
-                    it.setOpacity(base * (0.78 + 0.22 * (0.5 + 0.5 * sin(p + off))))
-                live.append((it, base, off, br))
+                age = f - birth
+                if age >= fade:
+                    self.scene().removeItem(it)
+                    continue
+                # ease-out fade (bright at birth, gently to zero)
+                t = 1.0 - age / fade
+                it.setOpacity(base * t * t)
+                live.append((it, base, birth))
             except RuntimeError:
                 continue
         self._glow_all = live
@@ -377,23 +363,17 @@ class BoardView(QGraphicsView):
         bright = QColor(col).lighter(150)
         path = self._bezier(pts)
         w = max(width, 1.2)
-        # spatial phase offset: the breath wave sweeps diagonally across the
-        # board so neighbouring traces glow slightly out of step (a flow, not
-        # a synchronized blink)
-        off = (pts[0][0] + pts[0][1]) * 0.006
         grp = QGraphicsItemGroup()
         grp.setOpacity(0.0)
-        # tighter glow than before: the widest halo is 3.2x (not 6x) so the
-        # bloom stays around each trace instead of washing across the board,
-        # and there's far less semi-transparent overdraw to redraw each frame.
-        # core = mult 1.0 (kept on finalize); every wider layer is glow and
-        # fades away when routing settles.
+        # glow halo (mult>1) fades out over GLOW_FADE frames from birth so it
+        # trails the routing front; the mult==1 core is the permanent clean
+        # trace. Widest halo 3.2x keeps the bloom local.
         from PySide6.QtWidgets import QGraphicsPathItem
-        for mult, alpha, c, breathe in (
-            (3.2, 0.09, col, True),
-            (1.9, 0.20, col, False),
-            (1.3, 0.42, bright, False),
-            (1.0, 0.98, bright, False),
+        for mult, alpha, c in (
+            (3.2, 0.10, col),
+            (1.9, 0.22, col),
+            (1.3, 0.45, bright),
+            (1.0, 0.97, bright),
         ):
             pen = QPen(QColor(c), w * mult)
             pen.setCapStyle(Qt.RoundCap)
@@ -402,8 +382,8 @@ class BoardView(QGraphicsView):
             pit.setPen(pen)
             pit.setOpacity(alpha)
             grp.addToGroup(pit)
-            if mult > 1.0:  # glow layer — breathes and fades out on finalize
-                self._glow_all.append((pit, alpha, off, breathe))
+            if mult > 1.0:  # glow layer — ages out, leaving the core
+                self._glow_all.append((pit, alpha, self._frame))
         grp.setZValue(3)
         self.scene().addItem(grp)
         self._fading.append([grp, 0, 1.0])
