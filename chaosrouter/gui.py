@@ -153,6 +153,7 @@ class BoardView(QGraphicsView):
         self._fading = []            # [ [group, frame, target], ... ]
         self._phase = 0.0
         self._settling = False       # final pass: fade all glow to nothing
+        self._final_mode = False     # after @CLEAR: draw clean, no glow
         from PySide6.QtCore import QTimer
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -288,6 +289,18 @@ class BoardView(QGraphicsView):
     def add_trace(self, net: str, layer: str, pts, width: float):
         if not pts:
             return
+        if self._final_mode:
+            # the finished, styled result (teardrops + fillets): draw crisp
+            # solid traces with NO glow — glow is only for the live route
+            path = self._bezier(pts)
+            pen = QPen(QColor(self.color_for(layer)).lighter(135), max(width, 1.0))
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            it = self.scene().addPath(path, pen)
+            it.setZValue(3)
+            it.setOpacity(0.97)
+            self.net_items.setdefault(net, []).append(it)
+            return
         if not self.GLOW:
             path = QPainterPath(QPointF(*pts[0]))
             for x, y in pts[1:]:
@@ -359,6 +372,7 @@ class BoardView(QGraphicsView):
         self._glow_all = []
         self._fading = []
         self._settling = False
+        self._final_mode = False
 
     def wheelEvent(self, ev):
         if not self._loaded:
@@ -708,8 +722,10 @@ class Main(QMainWindow):
                 self.view.rip_net(line[3:])
             elif line.startswith("@CLEAR"):
                 # about to receive the final styled geometry (teardrops +
-                # fillets) — drop the raw live route and redraw it clean
+                # fillets) — drop the raw glowing route and redraw it as
+                # clean, glow-free traces (glow is only for the live route)
                 self.view.clear_copper()
+                self.view._final_mode = True
             elif line.startswith("@P|"):
                 try:
                     _, pct, routed, failed = line.split("|", 3)
