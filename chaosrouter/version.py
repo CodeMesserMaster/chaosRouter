@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.18"
+__version__ = "0.2.19"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,13 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.19",
+        "2026-07-05",
+        ["New 'Balanced' method: spreads nets across signal layers by "
+         "congestion (shortest paths, no directional lanes). Additional "
+         "method for dense multi-layer boards; existing methods unchanged."],
+    ),
     (
         "0.2.18",
         "2026-07-04",

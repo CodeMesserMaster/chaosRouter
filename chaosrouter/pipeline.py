@@ -95,6 +95,12 @@ def run_pipeline(
     elif method == "simple":
         # fast first-pass only: no rip-up / shake / endgame completion tail
         result = router.route_all(progress=rp, rip_up=False)
+    elif method == "balanced":
+        # spread nets across signal layers by congestion (shortest paths, no
+        # directional lanes) — for dense multi-layer boards
+        from .balanced import route_all_balanced
+
+        result = route_all_balanced(router, progress=rp)
     else:
         result = router.route_all(progress=rp, persist_seconds=persist_seconds)
     t_route = time.time() - t0
