@@ -149,13 +149,14 @@ class BoardView(QGraphicsView):
         self.net_items: dict[str, list] = {}
         self._loaded = False
         # animation state
-        self._glow_layers = []       # (item, base_opacity, phase_offset)
+        self._glow_all = []          # (item, base_opacity, phase_offset, breathes)
         self._fading = []            # [ [group, frame, target], ... ]
         self._phase = 0.0
+        self._settling = False       # final pass: fade all glow to nothing
         from PySide6.QtCore import QTimer
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(22)        # ~45 fps for fluid motion
+        self._timer.start(16)        # ~60 fps
 
     def color_for(self, layer: str) -> QColor:
         if layer not in self.layer_color:
@@ -186,23 +187,43 @@ class BoardView(QGraphicsView):
 
     def _tick(self):
         import math
-        # gentle, slightly faster global phase; each trace carries its own
-        # spatial offset so the glow flows across the board as a wave rather
-        # than pulsing in unison (that uniform blink read as "itchy")
-        self._phase += 0.05
+        # SETTLE: on the final passes fade every glow layer out to nothing,
+        # then delete it — the finished board is left as clean, crisp traces
+        # (the bright cores) with no glow bloom.
+        if self._settling:
+            live = []
+            for it, base, off, br in self._glow_all:
+                try:
+                    if it.scene() is None:
+                        continue
+                    o = it.opacity() * 0.82
+                    if o < 0.012:
+                        self.scene().removeItem(it)
+                        continue
+                    it.setOpacity(o)
+                    live.append((it, base, off, br))
+                except RuntimeError:
+                    continue
+            self._glow_all = live
+            if not live:
+                self._settling = False
+            return
+        # gentle global phase; each trace carries its own spatial offset so
+        # the glow flows across the board as a wave, not a uniform blink
+        self._phase += 0.035
         p = self._phase
         sin = math.sin
         live = []
-        for it, base, off in self._glow_layers:
+        for it, base, off, br in self._glow_all:
             try:
                 if it.scene() is None:
                     continue
-                # shallow, smooth breath (0.72..1.0 of base) — no harsh dips
-                it.setOpacity(base * (0.72 + 0.28 * (0.5 + 0.5 * sin(p + off))))
-                live.append((it, base, off))
+                if br:  # shallow, smooth breath (0.78..1.0 of base)
+                    it.setOpacity(base * (0.78 + 0.22 * (0.5 + 0.5 * sin(p + off))))
+                live.append((it, base, off, br))
             except RuntimeError:
                 continue
-        self._glow_layers = live
+        self._glow_all = live
         still = []
         for entry in self._fading:
             grp, f, target = entry
@@ -210,14 +231,25 @@ class BoardView(QGraphicsView):
                 if grp.scene() is None:
                     continue
                 f += 1
-                t = min(1.0, f / 16.0)
+                t = min(1.0, f / 14.0)
                 grp.setOpacity(target * t * t * (3.0 - 2.0 * t))  # smoothstep
             except RuntimeError:
                 continue
-            if f < 16:
+            if f < 14:
                 entry[1] = f
                 still.append(entry)
         self._fading = still
+
+    def finalize(self):
+        """Routing finished: snap any in-flight fade-ins to full, then fade
+        all glow away so the final board is clean traces with no bloom."""
+        for entry in self._fading:
+            try:
+                entry[0].setOpacity(entry[2])
+            except RuntimeError:
+                pass
+        self._fading = []
+        self._settling = True
 
     def load_board(self, board):
         """Static content: outline + pads."""
@@ -280,23 +312,27 @@ class BoardView(QGraphicsView):
         off = (pts[0][0] + pts[0][1]) * 0.006
         grp = QGraphicsItemGroup()
         grp.setOpacity(0.0)
-        # layered glow: wide+faint -> narrow+bright core
+        # tighter glow than before: the widest halo is 3.2x (not 6x) so the
+        # bloom stays around each trace instead of washing across the board,
+        # and there's far less semi-transparent overdraw to redraw each frame.
+        # core = mult 1.0 (kept on finalize); every wider layer is glow and
+        # fades away when routing settles.
+        from PySide6.QtWidgets import QGraphicsPathItem
         for mult, alpha, c, breathe in (
-            (6.0, 0.10, col, True),
-            (3.2, 0.20, col, True),
-            (1.7, 0.42, bright, False),
+            (3.2, 0.09, col, True),
+            (1.9, 0.20, col, False),
+            (1.3, 0.42, bright, False),
             (1.0, 0.98, bright, False),
         ):
             pen = QPen(QColor(c), w * mult)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
-            from PySide6.QtWidgets import QGraphicsPathItem
             pit = QGraphicsPathItem(path)
             pit.setPen(pen)
             pit.setOpacity(alpha)
             grp.addToGroup(pit)
-            if breathe:
-                self._glow_layers.append((pit, alpha, off))
+            if mult > 1.0:  # glow layer — breathes and fades out on finalize
+                self._glow_all.append((pit, alpha, off, breathe))
         grp.setZValue(3)
         self.scene().addItem(grp)
         self._fading.append([grp, 0, 1.0])
@@ -320,6 +356,9 @@ class BoardView(QGraphicsView):
             for it in items:
                 self.scene().removeItem(it)
         self.net_items.clear()
+        self._glow_all = []
+        self._fading = []
+        self._settling = False
 
     def wheelEvent(self, ev):
         if not self._loaded:
@@ -687,6 +726,7 @@ class Main(QMainWindow):
     def _proc_done(self, code, _status):
         self.go.setEnabled(True)
         self.cancel_btn.setVisible(False)
+        self.view.finalize()  # fade all glow out -> clean final board
         stats = None
         if os.path.isfile(self._stats_path):
             try:
