@@ -681,6 +681,7 @@ class Main(QMainWindow):
         )
         self._stats_path = os.path.join(tempfile.gettempdir(), "chaosrouter_stats.json")
         self.view.clear_copper()
+        self._outbuf = ""
         self.log.clear()
         self.go.setEnabled(False)
         self.cancel_btn.setVisible(True)
@@ -707,7 +708,15 @@ class Main(QMainWindow):
         data = bytes(self.proc.readAllStandardOutput()).decode(
             "utf-8", errors="replace"
         )
-        for line in data.splitlines():
+        # QProcess delivers arbitrary chunks — a line (e.g. @CLEAR) can be
+        # split across two reads. Buffer the trailing partial line so we only
+        # ever act on COMPLETE lines; otherwise @CLEAR gets missed and the raw
+        # glowing route is never replaced by the clean styled result.
+        buf = getattr(self, "_outbuf", "") + data
+        parts = buf.split("\n")
+        self._outbuf = parts.pop()  # incomplete tail kept for next read
+        for line in parts:
+            line = line.rstrip("\r")
             if line.startswith("@T|"):
                 try:
                     _, net, layer, width, pts = line.split("|", 4)
