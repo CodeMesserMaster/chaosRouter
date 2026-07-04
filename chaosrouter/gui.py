@@ -330,20 +330,7 @@ class BoardView(QGraphicsView):
             return
         self._all_traces.append((net, layer, list(pts), width))
         if self._final_mode:
-            # the finished, styled result (teardrops + fillets): draw EXACT
-            # geometry (no bezier — the traces are already properly curved;
-            # re-smoothing overshoots on sharp turns and can make coupled
-            # diff-pair traces appear to cross). Crisp solid, no glow.
-            path = QPainterPath(QPointF(*pts[0]))
-            for x, y in pts[1:]:
-                path.lineTo(x, y)
-            pen = QPen(QColor(self.color_for(layer)).lighter(135), max(width, 1.0))
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            it = self.scene().addPath(path, pen)
-            it.setZValue(3)
-            it.setOpacity(0.97)
-            self.net_items.setdefault(net, []).append(it)
+            # collect only — the single clean redraw happens at finalize
             return
         if not self.GLOW:
             path = QPainterPath(QPointF(*pts[0]))
@@ -391,6 +378,8 @@ class BoardView(QGraphicsView):
 
     def add_via(self, net: str, x: float, y: float, dia: float):
         self._all_vias.append((net, x, y, dia))
+        if self._final_mode:
+            return  # collect only — drawn once at finalize
         r = dia / 2
         it = self.scene().addEllipse(
             x - r, y - r, dia, dia, QPen(QColor("#111111"), 0.8),
@@ -773,12 +762,14 @@ class Main(QMainWindow):
             elif line.startswith("@R|"):
                 self.view.rip_net(line[3:])
             elif line.startswith("@CLEAR"):
-                # about to receive the final styled geometry (teardrops +
-                # fillets) — drop the raw glowing route and redraw it as
-                # clean, glow-free traces (glow is only for the live route)
-                self.view.clear_copper()
+                # the final styled geometry (teardrops + fillets) follows.
+                # Collect it SILENTLY (no clear, no incremental draw) — the
+                # single clean swap happens once at finalize, so there is no
+                # end-of-route flash/redraw on top of the live view.
                 self.view._final_mode = True
-                self.log.appendPlainText("· styled result received — drawing clean")
+                self.view._all_traces = []
+                self.view._all_vias = []
+                self.log.appendPlainText("· styled result received")
             elif line.startswith("@P|"):
                 try:
                     _, pct, routed, failed = line.split("|", 3)
