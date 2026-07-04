@@ -68,13 +68,17 @@ def run_pipeline(
 
     def rp(i, n, name, res):
         failed = len(res.failed)
-        if isinstance(i, int) and n:            # first pass: nets i of n
+        if isinstance(i, int) and n:            # first pass / realize: i of n
             pct = 40.0 * i / n
-        else:                                   # completion tail
+        elif failed > st["peak"] or st["peak"] > 0:
+            # completion tail: advance as failures resolve toward zero
             if failed > st["peak"]:
                 st["peak"] = failed
-            peak = st["peak"] or 1
-            pct = 40.0 + 59.0 * (1.0 - failed / peak)
+            pct = 40.0 + 59.0 * (1.0 - failed / st["peak"])
+        else:
+            # no failures recorded yet (e.g. pathfinder's negotiate phase):
+            # hold — don't jump the bar to the end
+            pct = st["pct"]
         pct = max(st["pct"], min(99.0, pct))
         st["pct"] = pct
         say(f"@P|{pct:.1f}|{res.routed_edges}|{failed}")

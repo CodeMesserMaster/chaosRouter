@@ -289,6 +289,23 @@ class BoardView(QGraphicsView):
             it.setZValue(4)
             self.net_items.setdefault(net, []).append(it)
         self.viewport().update()
+        # DIAGNOSTIC: dump the exact finalized board so we can see what the
+        # GUI actually shows at the end of a route.
+        try:
+            import os as _os
+            import tempfile as _tf
+            from PySide6.QtCore import QRectF
+            from PySide6.QtGui import QImage, QPainter
+            rect = self.scene().itemsBoundingRect()
+            img = QImage(1600, 1200, QImage.Format_ARGB32)
+            img.fill(QColor("#0b0b0d"))
+            pnt = QPainter(img)
+            pnt.setRenderHint(QPainter.Antialiasing)
+            self.scene().render(pnt, QRectF(0, 0, 1600, 1200), rect)
+            pnt.end()
+            img.save(_os.path.join(_tf.gettempdir(), "chaosrouter_final_debug.png"))
+        except Exception:
+            pass
         return len(self._all_traces)
 
     def load_board(self, board):
@@ -770,6 +787,12 @@ class Main(QMainWindow):
                 self.view._all_traces = []
                 self.view._all_vias = []
                 self.log.appendPlainText("· styled result received")
+            elif "routing done" in line:
+                # end of the routing phase — belt to @CLEAR: from here on NO
+                # trace is ever drawn with glow, so the styled re-stream that
+                # follows can never produce an end-of-route glow burst
+                self.view._final_mode = True
+                self.log.appendPlainText(line)
             elif line.startswith("@P|"):
                 try:
                     _, pct, routed, failed = line.split("|", 3)
