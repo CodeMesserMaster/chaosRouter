@@ -175,16 +175,27 @@ class BoardView(QGraphicsView):
             for p in pts[1:]:
                 path.lineTo(p[0], p[1])
             return path
+        import math
         for i in range(1, n):
             p0 = pts[i - 2] if i >= 2 else pts[i - 1]
             p1 = pts[i - 1]
             p2 = pts[i]
             p3 = pts[i + 1] if i + 1 < n else pts[i]
-            c1x = p1[0] + (p2[0] - p0[0]) / 6.0
-            c1y = p1[1] + (p2[1] - p0[1]) / 6.0
-            c2x = p2[0] - (p3[0] - p1[0]) / 6.0
-            c2y = p2[1] - (p3[1] - p1[1]) / 6.0
-            path.cubicTo(c1x, c1y, c2x, c2y, p2[0], p2[1])
+            seg = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+            # clamp each control handle to <= 1/3 of the segment length so the
+            # curve never bulges past the segment (which read as a false cross
+            # on sharp diff-pair turns)
+            def handle(dx, dy, seg=seg):
+                h = math.hypot(dx, dy) / 6.0
+                cap = seg / 3.0
+                if h > cap and h > 1e-9:
+                    s = cap / h
+                    return dx / 6.0 * s, dy / 6.0 * s
+                return dx / 6.0, dy / 6.0
+            h1x, h1y = handle(p2[0] - p0[0], p2[1] - p0[1])
+            h2x, h2y = handle(p3[0] - p1[0], p3[1] - p1[1])
+            path.cubicTo(p1[0] + h1x, p1[1] + h1y,
+                         p2[0] - h2x, p2[1] - h2y, p2[0], p2[1])
         return path
 
     def _tick(self):
@@ -296,9 +307,13 @@ class BoardView(QGraphicsView):
         if not pts:
             return
         if self._final_mode:
-            # the finished, styled result (teardrops + fillets): draw crisp
-            # solid traces with NO glow — glow is only for the live route
-            path = self._bezier(pts)
+            # the finished, styled result (teardrops + fillets): draw EXACT
+            # geometry (no bezier — the traces are already properly curved;
+            # re-smoothing overshoots on sharp turns and can make coupled
+            # diff-pair traces appear to cross). Crisp solid, no glow.
+            path = QPainterPath(QPointF(*pts[0]))
+            for x, y in pts[1:]:
+                path.lineTo(x, y)
             pen = QPen(QColor(self.color_for(layer)).lighter(135), max(width, 1.0))
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
