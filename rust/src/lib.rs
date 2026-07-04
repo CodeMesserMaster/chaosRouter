@@ -10,7 +10,66 @@ use pyo3::prelude::*;
 use rayon::prelude::*;
 
 mod astar;
+mod collision;
+mod engine;
+mod fields;
 mod geom;
+
+/// Route a board in parallel (rayon, no GIL). Inputs are plain Python lists:
+///   pads: [(net_id:int, layer:int, xs:list[float], ys:list[float], clr:float)]
+///   jobs: [(net_id:int, pad_indices:list[int], width:float, clr:float)]
+/// Returns [(net_id, layer, xs, ys, width)] and (wall_secs, threads).
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn route_board(
+    py: Python<'_>,
+    nl: usize,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    step: f64,
+    pads: Vec<(i32, usize, Vec<f64>, Vec<f64>, f64)>,
+    jobs: Vec<(i32, Vec<usize>, f64, f64)>,
+) -> (Vec<(i32, usize, Vec<f64>, Vec<f64>, f64)>, f64, usize) {
+    let pads: Vec<engine::Pad> = pads
+        .into_iter()
+        .map(|(net, layer, xs, ys, clr)| {
+            let cx = xs.iter().sum::<f64>() / xs.len().max(1) as f64;
+            let cy = ys.iter().sum::<f64>() / ys.len().max(1) as f64;
+            engine::Pad { net, layer, xs, ys, cx, cy, clr }
+        })
+        .collect();
+    let jobs: Vec<engine::NetJob> = jobs
+        .into_iter()
+        .map(|(net, pads, width, clr)| engine::NetJob { net, pads, width, clr })
+        .collect();
+    let board = engine::Board { nl, x0, y0, x1, y1, step, pads };
+    let (traces, secs, threads) = py.allow_threads(|| {
+        let t = std::time::Instant::now();
+        let tr = engine::route_board(&board, &jobs);
+        (tr, t.elapsed().as_secs_f64(), rayon::current_num_threads())
+    });
+    let out = traces
+        .into_iter()
+        .map(|t| (t.net, t.layer, t.xs, t.ys, t.width))
+        .collect();
+    (out, secs, threads)
+}
+
+/// EDT distance field (mils) — port of fields.distance_field.
+#[pyfunction]
+fn distance_field<'py>(
+    py: Python<'py>,
+    obstacle: PyReadonlyArray1<bool>,
+    ny: usize,
+    nx: usize,
+    step: f64,
+) -> Bound<'py, PyArray1<f32>> {
+    let obs = obstacle.as_slice().unwrap();
+    let out = py.allow_threads(|| fields::distance_field(obs, ny, nx, step));
+    out.into_pyarray(py)
+}
 
 /// Distance between two segments (for cross-checking against Python/shapely).
 #[pyfunction]
@@ -136,5 +195,7 @@ fn chaosrouter_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(num_threads, m)?)?;
     m.add_function(wrap_pyfunction!(route_astar, m)?)?;
     m.add_function(wrap_pyfunction!(astar_bench, m)?)?;
+    m.add_function(wrap_pyfunction!(distance_field, m)?)?;
+    m.add_function(wrap_pyfunction!(route_board, m)?)?;
     Ok(())
 }
