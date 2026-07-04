@@ -29,9 +29,16 @@ fn route_board(
     x1: f64,
     y1: f64,
     step: f64,
+    outline_x: Vec<f64>,
+    outline_y: Vec<f64>,
     pads: Vec<(i32, usize, Vec<f64>, Vec<f64>, f64)>,
     jobs: Vec<(i32, Vec<usize>, f64, f64)>,
-) -> (Vec<(i32, usize, Vec<f64>, Vec<f64>, f64)>, f64, usize) {
+) -> (
+    Vec<(i32, usize, Vec<f64>, Vec<f64>, f64)>,
+    Vec<(i32, f64, f64)>,
+    f64,
+    usize,
+) {
     let pads: Vec<engine::Pad> = pads
         .into_iter()
         .map(|(net, layer, xs, ys, clr)| {
@@ -44,17 +51,21 @@ fn route_board(
         .into_iter()
         .map(|(net, pads, width, clr)| engine::NetJob { net, pads, width, clr })
         .collect();
-    let board = engine::Board { nl, x0, y0, x1, y1, step, pads };
-    let (traces, secs, threads) = py.allow_threads(|| {
+    let board = engine::Board {
+        nl, x0, y0, x1, y1, step, pads,
+        outline_x, outline_y,
+    };
+    let (traces, vias, secs, threads) = py.allow_threads(|| {
         let t = std::time::Instant::now();
-        let tr = engine::route_board(&board, &jobs);
-        (tr, t.elapsed().as_secs_f64(), rayon::current_num_threads())
+        let (tr, vs) = engine::route_board(&board, &jobs);
+        (tr, vs, t.elapsed().as_secs_f64(), rayon::current_num_threads())
     });
     let out = traces
         .into_iter()
         .map(|t| (t.net, t.layer, t.xs, t.ys, t.width))
         .collect();
-    (out, secs, threads)
+    let vout = vias.into_iter().map(|v| (v.net, v.x, v.y)).collect();
+    (out, vout, secs, threads)
 }
 
 /// EDT distance field (mils) — port of fields.distance_field.

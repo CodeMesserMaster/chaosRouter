@@ -18,7 +18,8 @@ def build_and_route(dsn):
         centre_of[pid] = (pad.x, pad.y)
         netc = board.nets.get(pad.net)
         clr = netc.clearance if netc else board.default_clearance
-        nid = net_id.get(pad.net, -1)
+        # no-net pads (holes, mounting) block everyone -> sentinel -2
+        nid = net_id.get(pad.net, -2) if pad.net else -2
         first = None
         for ly in pad.layers():
             g = pad.geometry_on(ly)
@@ -49,12 +50,14 @@ def build_and_route(dsn):
         term = [terminal_of[p] for p in order]
         jobs.append((net_id[name], term, net.width, net.clearance))
 
+    ext = list(board.outline.exterior.coords)
+    ox = [p[0] for p in ext]; oy = [p[1] for p in ext]
     print(f"board: {len(board.layers)} layers, {len(pads)} pad-faces, {len(jobs)} nets to route")
-    traces, secs, threads = rs.route_board(
-        len(board.layers), b[0], b[1], b[2], b[3], 4.0, pads, jobs)
+    traces, vias, secs, threads = rs.route_board(
+        len(board.layers), b[0], b[1], b[2], b[3], 4.0, ox, oy, pads, jobs)
     print(f"RUST route_board: {len(traces)} trace-segments in {secs:.2f}s "
           f"across {threads} threads")
-    return board, traces, secs
+    return board, traces, vias, secs
 
 
 if __name__ == "__main__":
