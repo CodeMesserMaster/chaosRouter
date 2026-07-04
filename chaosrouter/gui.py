@@ -245,17 +245,18 @@ class BoardView(QGraphicsView):
         self._fading = still
 
     def finalize(self):
-        """Routing finished: snap any in-flight fade-ins to full, then fade
-        ALL glow away (guaranteed gone within ~10 frames) so the final board
-        is clean traces with zero glow."""
-        for entry in self._fading:
+        """Routing finished: INSTANTLY remove every glow layer (no fade that
+        could flash) so the final board is clean traces with zero glow —
+        regardless of stream timing or a missed @CLEAR."""
+        self._fading = []
+        self._settling = False
+        for it, base, off, br in self._glow_all:
             try:
-                entry[0].setOpacity(entry[2])
+                if it.scene() is not None:
+                    self.scene().removeItem(it)
             except RuntimeError:
                 pass
-        self._fading = []
-        self._settle_f = 0
-        self._settling = True
+        self._glow_all = []
 
     def load_board(self, board):
         """Static content: outline + pads."""
