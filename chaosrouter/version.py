@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.11"
+__version__ = "0.2.12"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,14 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.12",
+        "2026-07-04",
+        ["Fix diff-pair false-crossing: the bezier smoothing (added with the "
+         "glow animation) overshot on sharp turns and drew coupled pairs as "
+         "crossing. The geometry never crossed (shapely-confirmed). Final "
+         "result now renders exact geometry; live bezier handles are clamped."],
+    ),
     (
         "0.2.11",
         "2026-07-04",
