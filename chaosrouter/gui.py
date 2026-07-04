@@ -155,6 +155,8 @@ class BoardView(QGraphicsView):
         self._settling = False       # final pass: fade all glow to nothing
         self._settle_f = 0
         self._final_mode = False     # after @CLEAR: draw clean, no glow
+        self._all_traces = []        # (net, layer, coords, width) — for the
+        self._all_vias = []          # (net, x, y, dia)  clean finalize redraw
         from PySide6.QtCore import QTimer
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -256,26 +258,52 @@ class BoardView(QGraphicsView):
         self._fading = still
 
     def finalize(self):
-        """Routing finished: remove ALL glow so the final board is clean
-        traces with zero glow. Bulletproof — scans the whole scene and drops
-        every semi-transparent item. Pads/outline/cores carry their
-        transparency in the BRUSH/pen colour (item opacity == 1.0), so only
-        glow layers (item opacity 0.09-0.42) are removed. Works regardless of
-        _glow_all tracking or a missed @CLEAR."""
+        """Routing finished: wipe ALL copper from the scene and REDRAW every
+        trace/via from scratch as clean, glow-free geometry. A full clean
+        redraw cannot leave any glow behind — no dependence on @CLEAR, glow
+        tracking, or fade timing."""
         self._fading = []
         self._settling = False
         self._glow_all = []
-        removed = 0
+        # remove every copper item currently on the scene
+        for items in self.net_items.values():
+            for it in items:
+                try:
+                    self.scene().removeItem(it)
+                except RuntimeError:
+                    pass
+        self.net_items.clear()
+        # belt: drop any stray semi-transparent item too
         for it in list(self.scene().items()):
             try:
-                o = it.opacity()
-                if 0.0 < o < 0.6:
+                if 0.0 < it.opacity() < 0.6:
                     self.scene().removeItem(it)
-                    removed += 1
             except RuntimeError:
                 pass
-        self.viewport().update()  # force a repaint of the cleaned scene
-        return removed
+        # redraw all traces CLEAN (exact geometry, solid, no glow)
+        for net, layer, pts, width in self._all_traces:
+            if len(pts) < 2:
+                continue
+            path = QPainterPath(QPointF(*pts[0]))
+            for x, y in pts[1:]:
+                path.lineTo(x, y)
+            pen = QPen(QColor(self.color_for(layer)).lighter(135), max(width, 1.0))
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            it = self.scene().addPath(path, pen)
+            it.setZValue(3)
+            it.setOpacity(0.97)
+            self.net_items.setdefault(net, []).append(it)
+        for net, x, y, dia in self._all_vias:
+            r = dia / 2
+            it = self.scene().addEllipse(
+                x - r, y - r, dia, dia, QPen(QColor("#111111"), 0.8),
+                QBrush(QColor(VIA_COLOR)),
+            )
+            it.setZValue(4)
+            self.net_items.setdefault(net, []).append(it)
+        self.viewport().update()
+        return len(self._all_traces)
 
     def load_board(self, board):
         """Static content: outline + pads."""
@@ -314,6 +342,7 @@ class BoardView(QGraphicsView):
     def add_trace(self, net: str, layer: str, pts, width: float):
         if not pts:
             return
+        self._all_traces.append((net, layer, list(pts), width))
         if self._final_mode:
             # the finished, styled result (teardrops + fillets): draw EXACT
             # geometry (no bezier — the traces are already properly curved;
@@ -381,6 +410,7 @@ class BoardView(QGraphicsView):
         self.net_items.setdefault(net, []).append(grp)
 
     def add_via(self, net: str, x: float, y: float, dia: float):
+        self._all_vias.append((net, x, y, dia))
         r = dia / 2
         it = self.scene().addEllipse(
             x - r, y - r, dia, dia, QPen(QColor("#111111"), 0.8),
@@ -392,6 +422,8 @@ class BoardView(QGraphicsView):
     def rip_net(self, net: str):
         for it in self.net_items.pop(net, []):
             self.scene().removeItem(it)
+        self._all_traces = [t for t in self._all_traces if t[0] != net]
+        self._all_vias = [v for v in self._all_vias if v[0] != net]
 
     def clear_copper(self):
         for items in self.net_items.values():
@@ -402,6 +434,8 @@ class BoardView(QGraphicsView):
         self._fading = []
         self._settling = False
         self._final_mode = False
+        self._all_traces = []
+        self._all_vias = []
 
     def wheelEvent(self, ev):
         if not self._loaded:
