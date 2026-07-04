@@ -40,6 +40,7 @@ MUTED = "#8a8a92"
 LAYER_COLORS = ["#f5a623", "#31b0d5", "#3fbf6f", "#e05555",
                 "#8a6cf0", "#d05ce3", "#5ce3c7", "#e3b25c"]
 VIA_COLOR = "#e8c34a"
+OUTLINE_COLOR = "#ff6ea6"  # bright neon pink board outline
 
 QSS = f"""
 QMainWindow, QDialog {{ background: {BG}; }}
@@ -232,7 +233,7 @@ class BoardView(QGraphicsView):
             path = QPainterPath(QPointF(*ext[0]))
             for x, y in ext[1:]:
                 path.lineTo(x, y)
-            item = sc.addPath(path, QPen(QColor("#3a3a42"), 2))
+            item = sc.addPath(path, QPen(QColor(OUTLINE_COLOR), 2))
             item.setZValue(0)
         except Exception:
             pass

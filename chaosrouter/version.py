@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,11 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.7",
+        "2026-07-04",
+        ["Board outline drawn in bright neon pink for visibility."],
+    ),
     (
         "0.2.6",
         "2026-07-04",
