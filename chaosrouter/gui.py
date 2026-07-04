@@ -153,6 +153,7 @@ class BoardView(QGraphicsView):
         self._fading = []            # [ [group, frame, target], ... ]
         self._phase = 0.0
         self._settling = False       # final pass: fade all glow to nothing
+        self._settle_f = 0
         self._final_mode = False     # after @CLEAR: draw clean, no glow
         from PySide6.QtCore import QTimer
         self._timer = QTimer(self)
@@ -192,13 +193,15 @@ class BoardView(QGraphicsView):
         # then delete it — the finished board is left as clean, crisp traces
         # (the bright cores) with no glow bloom.
         if self._settling:
+            self._settle_f += 1
+            hard = self._settle_f >= 10   # guaranteed gone after ~10 frames
             live = []
             for it, base, off, br in self._glow_all:
                 try:
                     if it.scene() is None:
                         continue
-                    o = it.opacity() * 0.82
-                    if o < 0.012:
+                    o = it.opacity() * 0.66
+                    if hard or o < 0.02:
                         self.scene().removeItem(it)
                         continue
                     it.setOpacity(o)
@@ -243,13 +246,15 @@ class BoardView(QGraphicsView):
 
     def finalize(self):
         """Routing finished: snap any in-flight fade-ins to full, then fade
-        all glow away so the final board is clean traces with no bloom."""
+        ALL glow away (guaranteed gone within ~10 frames) so the final board
+        is clean traces with zero glow."""
         for entry in self._fading:
             try:
                 entry[0].setOpacity(entry[2])
             except RuntimeError:
                 pass
         self._fading = []
+        self._settle_f = 0
         self._settling = True
 
     def load_board(self, board):
