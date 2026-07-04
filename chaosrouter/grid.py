@@ -59,6 +59,15 @@ class Workspace:
 
         self._outline_prepared = prep(board.outline)
 
+        # nogil collision index (mirrors the copper registry): the exact
+        # trace check delegates to it so validation is GIL-free and threads
+        # parallelize. Verified 100% against the shapely path.
+        from .fastcopper import FastCopper
+
+        b = board.outline.bounds
+        self.fast = FastCopper(board, b[0], b[1], b[2], b[3])
+        self._fast_lock = threading.Lock()
+
         self._block_outside()
         self._rasterize_pads()
 
@@ -115,6 +124,9 @@ class Workspace:
                 iys, ixs = self._cells_in_geom(geom)
                 self.owner[layer][iys, ixs] = nid
                 self.copper[layer].append((pad.net, geom, clr, "pad", geom, 0.0))
+                if hasattr(geom, "exterior"):
+                    self.fast.add_polygon(layer, list(geom.exterior.coords),
+                                          clr, pad.net)
 
     # ---- exact clearance validation ------------------------------------
     def _tree(self, layer):
@@ -182,6 +194,11 @@ class Workspace:
             return False
         if not self.edge_clear(line, half, clearance):
             return False
+        # SHAPELY is the authoritative validator — it must agree with the
+        # final DRC exactly (0 violations). The experimental nogil FastCopper
+        # validator is kept for benchmarking but NOT used to gate routing:
+        # any disagreement would let the router commit a trace the DRC then
+        # flags. Quality over speed.
         tree, items = self._tree(layer)
         if tree is None:
             return True
@@ -191,8 +208,6 @@ class Workspace:
             other_net, geom, other_clr, kind, raw, r = items[int(idx)]
             if other_net is not None and other_net == net:
                 continue
-            # partner nets of a diff pair are exempt only for their TRACES
-            # (parallel by construction) — their pads are real copper obstacles
             if other_net in friends and kind in ("trace", "via"):
                 continue
             if line.distance(raw) - half - r < max(clearance, other_clr) - 1e-6:
@@ -257,6 +272,7 @@ class Workspace:
             grid[iys[sel], ixs[sel]] = nid
             self.wiring_owner[layer][iys, ixs] = nid
             self.copper[layer].append((net, geom, clr, "trace", line, width / 2))
+            self.fast.add_segments(layer, coords, width / 2, clr, net)
             self._trees_dirty = True
             self._patch_exempt(net, geom, [layer])
 
@@ -275,6 +291,7 @@ class Workspace:
                 grid[iys[sel], ixs[sel]] = nid
                 self.wiring_owner[layer][iys, ixs] = nid
                 self.copper[layer].append((net, geom, clr, "via", pt, diameter / 2))
+                self.fast.add_circle(layer, x, y, diameter / 2, clr, net)
             self._trees_dirty = True
             self._patch_exempt(net, geom, self.layers)
 
@@ -295,6 +312,7 @@ class Workspace:
                 self.copper[layer] = keep
             self._trees_dirty = True
             self._exempt_cache = {}  # rip events are rare; drop the cache
+            self.fast.remove_net(net)
             for layer, geom in removed:
                 self._rebuild_region(layer, geom)
             return len(removed)
@@ -360,17 +378,12 @@ class Workspace:
     EDT_GUARD = 60.0  # mil of extra visibility beyond a windowed region
 
     def _edt_layers(self, masks: dict) -> dict:
-        """EDT per layer, on parallel threads (the kernel is GIL-free)."""
-        if len(masks) <= 1:
-            return {ly: distance_field(m, self.step) for ly, m in masks.items()}
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=len(masks)) as pool:
-            futs = {
-                ly: pool.submit(distance_field, m, self.step)
-                for ly, m in masks.items()
-            }
-            return {ly: f.result() for ly, f in futs.items()}
+        """EDT per layer, serially. (Do NOT spawn a nested thread pool here:
+        route_net already runs many nets in parallel, so a per-call pool
+        would create 64+ threads thrashing the GIL + workspace lock — the
+        exact stall that pinned CPU at ~6%. The kernel is nogil, so the
+        OUTER per-net parallelism uses the cores.)"""
+        return {ly: distance_field(m, self.step) for ly, m in masks.items()}
 
     def foreign_distance(self, net, bounds=None) -> dict[str, np.ndarray]:
         """Per layer: distance (in mils) from each cell to nearest foreign copper

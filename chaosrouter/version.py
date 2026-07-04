@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.16"
+__version__ = "0.2.17"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,18 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.17",
+        "2026-07-04",
+        [
+            "QUALITY FIX: routing validation reverted to authoritative shapely "
+            "(the experimental nogil FastCopper validator disagreed in rare "
+            "dynamic cases, letting the router commit traces the DRC then "
+            "flagged — the source of clearance violations). Back to 0 viol.",
+            "PathFinder progress bar no longer jumps to the end during its "
+            "negotiate phase; end-of-route glow guard on 'routing done'.",
+        ],
+    ),
     (
         "0.2.16",
         "2026-07-04",
