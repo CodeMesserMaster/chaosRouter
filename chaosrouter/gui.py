@@ -66,6 +66,23 @@ QLineEdit, QDoubleSpinBox {{
     background: {PANEL2}; border: 1px solid #26262e; border-radius: 6px;
     padding: 6px;
 }}
+QComboBox {{
+    background: {PANEL2}; color: {TEXT}; border: 1px solid #34343e;
+    border-radius: 6px; padding: 6px 10px;
+}}
+QComboBox:hover {{ border-color: {ACCENT}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox::down-arrow {{
+    width: 0; height: 0; margin-right: 8px;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid {ACCENT};
+}}
+QComboBox QAbstractItemView {{
+    background: {PANEL2}; color: {TEXT};
+    border: 1px solid {ACCENT}; border-radius: 6px; outline: none;
+    padding: 4px;
+    selection-background-color: {ACCENT}; selection-color: #14100a;
+}}
 QPlainTextEdit {{
     background: #0e0e11; border: none; border-radius: 8px;
     color: #b9b9c2; font-family: Consolas, Menlo, monospace; font-size: 12px;
@@ -649,14 +666,18 @@ class Main(QMainWindow):
                     pass
             elif line.startswith("@R|"):
                 self.view.rip_net(line[3:])
+            elif line.startswith("@CLEAR"):
+                # about to receive the final styled geometry (teardrops +
+                # fillets) — drop the raw live route and redraw it clean
+                self.view.clear_copper()
             elif line.startswith("@P|"):
                 try:
-                    _, i, n = line.split("|", 2)
-                    i, n = int(i), int(n)
-                    if n:
-                        pct = max(0, min(100, round(100 * i / n)))
-                        self.progress.setValue(pct)
-                        self.progress.setFormat(f"{i}/{n} connections  ·  {pct}%")
+                    _, pct, routed, failed = line.split("|", 3)
+                    pct = max(0, min(100, round(float(pct))))
+                    self.progress.setValue(pct)
+                    self.progress.setFormat(
+                        f"{routed} routed · {failed} left  ·  {pct}%"
+                    )
                 except ValueError:
                     pass
             elif line.strip():

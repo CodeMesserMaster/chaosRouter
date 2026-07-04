@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,19 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.6",
+        "2026-07-04",
+        [
+            "Board view now redraws with the FINAL styled geometry after "
+            "routing — teardrop pad entries, graded neck-downs and filleted "
+            "arcs (previously the live view only showed the raw route, since "
+            "style passes stream with the hook off).",
+            "Progress bar spans all phases: first pass fills to 40%, then the "
+            "rip-up/shake/endgame tail fills to 100% as failures resolve.",
+            "Higher-contrast, readable method dropdown.",
+        ],
+    ),
     (
         "0.2.5",
         "2026-07-04",

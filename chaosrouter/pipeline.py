@@ -60,13 +60,28 @@ def run_pipeline(
         avoid_padstacks=frozenset(avoid_padstacks or ()),
     )
 
+    # Progress spanning ALL phases: the first pass fills 0->40% (fast, does
+    # the bulk of connections), then the completion tail (rip-up/shake/
+    # endgame) fills 40->99% as it drives the failure count toward zero.
+    # Monotonic so shake's temporary failure bumps never rewind the bar.
+    st = {"peak": 0, "pct": 0.0}
+
     def rp(i, n, name, res):
-        if isinstance(i, int) and n:
-            say(f"@P|{i}|{n}")  # machine-readable progress for the GUI bar
+        failed = len(res.failed)
+        if isinstance(i, int) and n:            # first pass: nets i of n
+            pct = 40.0 * i / n
+        else:                                   # completion tail
+            if failed > st["peak"]:
+                st["peak"] = failed
+            peak = st["peak"] or 1
+            pct = 40.0 + 59.0 * (1.0 - failed / peak)
+        pct = max(st["pct"], min(99.0, pct))
+        st["pct"] = pct
+        say(f"@P|{pct:.1f}|{res.routed_edges}|{failed}")
         if (isinstance(i, int) and n and (i % 10 == 0 or i == n)) or n == 0:
             say(
                 f"[{i}/{n}] {name}  edges={res.routed_edges} "
-                f"failed={len(res.failed)} vias={len(res.vias)}"
+                f"failed={failed} vias={len(res.vias)}"
             )
 
     if method == "pathfinder":
@@ -106,6 +121,17 @@ def run_pipeline(
         say(f"style: {pruned} stubs pruned, {grafts} exits grafted, {fat} fattened")
         say("filleting corners into arcs ...")
         fillet_result(result, ws, board, r_target=fillet_r)
+
+    # redraw the live view with the FINAL styled geometry — teardrop pad
+    # entries, graded neck-downs and filleted arcs. The route streamed in
+    # raw (style passes run with the on_add hook off), so without this the
+    # board view never shows the tapered/teardropped result.
+    if on_add:
+        say("@CLEAR")
+        for t in result.traces:
+            on_add("trace", t.net, t.layer, t.coords, t.width)
+        for v in result.vias:
+            on_add("via", v.net, v.x, v.y, v.diameter)
 
     pairs = check_pairs(board, result)
     for p_name, n_name, pct, unc in pairs:
