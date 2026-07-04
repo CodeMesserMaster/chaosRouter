@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.12"
+__version__ = "0.2.13"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,14 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.13",
+        "2026-07-04",
+        ["Bulletproof glow removal: finalize scans the whole scene and drops "
+         "every semi-transparent item (pads/cores keep transparency in their "
+         "brush, item-opacity 1.0, so only glow is removed). Log now shows "
+         "when the styled result arrives and how many glow items were removed."],
+    ),
     (
         "0.2.12",
         "2026-07-04",

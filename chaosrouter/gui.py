@@ -256,18 +256,26 @@ class BoardView(QGraphicsView):
         self._fading = still
 
     def finalize(self):
-        """Routing finished: INSTANTLY remove every glow layer (no fade that
-        could flash) so the final board is clean traces with zero glow —
-        regardless of stream timing or a missed @CLEAR."""
+        """Routing finished: remove ALL glow so the final board is clean
+        traces with zero glow. Bulletproof — scans the whole scene and drops
+        every semi-transparent item. Pads/outline/cores carry their
+        transparency in the BRUSH/pen colour (item opacity == 1.0), so only
+        glow layers (item opacity 0.09-0.42) are removed. Works regardless of
+        _glow_all tracking or a missed @CLEAR."""
         self._fading = []
         self._settling = False
-        for it, base, off, br in self._glow_all:
+        self._glow_all = []
+        removed = 0
+        for it in list(self.scene().items()):
             try:
-                if it.scene() is not None:
+                o = it.opacity()
+                if 0.0 < o < 0.6:
                     self.scene().removeItem(it)
+                    removed += 1
             except RuntimeError:
                 pass
-        self._glow_all = []
+        self.viewport().update()  # force a repaint of the cleaned scene
+        return removed
 
     def load_board(self, board):
         """Static content: outline + pads."""
@@ -756,6 +764,7 @@ class Main(QMainWindow):
                 # clean, glow-free traces (glow is only for the live route)
                 self.view.clear_copper()
                 self.view._final_mode = True
+                self.log.appendPlainText("· styled result received — drawing clean")
             elif line.startswith("@P|"):
                 try:
                     _, pct, routed, failed = line.split("|", 3)
@@ -772,7 +781,11 @@ class Main(QMainWindow):
     def _proc_done(self, code, _status):
         self.go.setEnabled(True)
         self.cancel_btn.setVisible(False)
-        self.view.finalize()  # fade all glow out -> clean final board
+        removed = self.view.finalize()  # remove all glow -> clean final board
+        self.log.appendPlainText(
+            f"· finalize: removed {removed} residual glow item(s), "
+            f"final_mode={self.view._final_mode}"
+        )
         stats = None
         if os.path.isfile(self._stats_path):
             try:
