@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,19 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.4",
+        "2026-07-04",
+        [
+            "Glowing live board animation: traces render as smooth bezier "
+            "curves with layered neon glow that fade in as they route and "
+            "breathe with an ambient pulse (old-screensaver aesthetic).",
+            "Speed foundation: nogil numba geometry kernels (seg/seg, "
+            "seg/poly, point-in-poly) + a fully-nogil CSR collision index "
+            "verified 100% against shapely (1000+ tests) — the keystone for "
+            "GIL-free parallel routing. nogil string-pull; parallel shaker.",
+        ],
+    ),
     (
         "0.2.3",
         "2026-07-03",

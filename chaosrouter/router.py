@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .fields import seg_clear, string_pull
 from .grid import Workspace
 from .model import Board, Net
 
@@ -129,7 +130,8 @@ class Router:
 
         nets = [n for n in self.net_order() if n.name not in self.result.diffpair_nets]
         if workers is None:
-            workers = max(1, (os.cpu_count() or 8) // 2)
+            # use (nearly) all logical cores — the numba kernels are nogil
+            workers = max(1, (os.cpu_count() or 8) - 2)
         self._workers = workers
         if workers > 1:
             self._route_parallel(nets, workers, progress)
@@ -140,10 +142,10 @@ class Router:
                     progress(i + 1, len(nets), net.name, self.result)
         if rip_up:
             self._rip_and_retry(progress)
-            self._shake(progress)
+            self._shake_parallel(progress)   # parallel across cores
             self._endgame(progress)
             if self.result.failed:
-                self._shake(progress)  # endgame reshuffles; shake the rest
+                self._shake_parallel(progress)
             # persistence: the board is routable — keep rolling fresh seeds
             # through shake+endgame until complete or the budget runs out
             import time as _t
@@ -271,6 +273,131 @@ class Router:
                 if c:
                     self.result.edges_by_net[g] = c
             self.result.routed_edges = snap_count
+
+    # ---------------- parallel shaker ------------------------------------
+    def _shake_one(self, edge, seed):
+        """One shake attempt around a failing edge, on its own disjoint
+        region. Returns True if it reduced failures (kept), else rolls back.
+        Thread-safe: touches only nets in its region; result/ws mutations
+        are locked."""
+        import random
+        from shapely.geometry import box as shp_box
+
+        rng = random.Random(seed)
+        net_name, pid_a, pid_b = edge
+        pa = self.board.pads.get(pid_a)
+        pb = self.board.pads.get(pid_b)
+        if pa is None or pb is None:
+            return False
+        m = 150.0
+        qbox = shp_box(min(pa.x, pb.x) - m, min(pa.y, pb.y) - m,
+                       max(pa.x, pb.x) + m, max(pa.y, pb.y) + m)
+        cands = set()
+        for layer in self.ws.layers:
+            tree, items = self.ws._tree(layer)
+            if tree is None:
+                continue
+            for idx in tree.query(qbox):
+                onet, geom, clr, kind, _raw, _r = items[int(idx)]
+                if kind == "pad" or onet is None:
+                    continue
+                if onet == net_name or onet in self.result.diffpair_nets:
+                    continue
+                if self._net_edge_count(onet) > self.MAX_VICTIM_EDGES:
+                    continue
+                cands.add(onet)
+        if not cands:
+            return False
+        chosen = rng.sample(sorted(cands), min(len(cands), rng.randint(1, 3)))
+        group = [net_name] + chosen
+
+        with self._result_lock:
+            snap_traces = [t for t in self.result.traces if t.net in group]
+            snap_vias = [v for v in self.result.vias if v.net in group]
+            snap_failed_group = [f for f in self.result.failed if f[0] in group]
+            snap_edges = {g: self.result.edges_by_net.get(g, 0) for g in group}
+        base_fail = len(snap_failed_group)
+
+        for g in group:
+            self._rip_net(g)
+        order = group[:]
+        rng.shuffle(order)
+        for g in order:
+            self.route_net(self.board.nets[g])
+
+        now_fail = len([f for f in self.result.failed if f[0] in group])
+        if now_fail < base_fail:
+            return True
+        # reject: exact rollback of just this group
+        for g in group:
+            self._rip_net(g)
+        with self._result_lock:
+            for t in snap_traces:
+                self.result.traces.append(t)
+                self.ws.add_trace(t.net, t.layer, t.coords, t.width)
+            for v in snap_vias:
+                self.result.vias.append(v)
+                self.ws.add_via(v.net, v.x, v.y, v.diameter)
+            self.result.failed.extend(snap_failed_group)
+            for g, c in snap_edges.items():
+                if c:
+                    self.result.edges_by_net[g] = c
+                    self.result.routed_edges += c
+        return False
+
+    def _disjoint_batches(self, edges, reach=650.0):
+        """Group failing edges so that within a batch no two edges' regions
+        overlap (reach = query box + reroute margin) — those can shake in
+        parallel without touching each other's copper."""
+        boxes = []
+        for e in edges:
+            pa = self.board.pads.get(e[1]); pb = self.board.pads.get(e[2])
+            if pa is None or pb is None:
+                continue
+            boxes.append((e, (min(pa.x, pb.x) - reach, min(pa.y, pb.y) - reach,
+                              max(pa.x, pb.x) + reach, max(pa.y, pb.y) + reach)))
+        batches = []
+        for e, b in boxes:
+            placed = False
+            for batch in batches:
+                if all(not (b[0] < ob[2] and ob[0] < b[2]
+                            and b[1] < ob[3] and ob[1] < b[3])
+                       for _, ob in batch):
+                    batch.append((e, b)); placed = True; break
+            if not placed:
+                batches.append([(e, b)])
+        return [[e for e, _ in batch] for batch in batches]
+
+    def _shake_parallel(self, progress=None, seed: int = 20260703, rounds=40):
+        """Parallel shaker: each round, failing edges are packed into
+        spatially-disjoint batches and every edge in a batch is shaken
+        concurrently across all workers. Correct because disjoint regions
+        never touch the same copper; quality identical to sequential (each
+        attempt keeps only on strict local improvement)."""
+        import concurrent.futures as cf
+
+        workers = getattr(self, "_workers", 8)
+        rejects = 0
+        for r in range(rounds):
+            fails = [f for f in self.result.failed
+                     if f[0] not in self.result.diffpair_nets]
+            if not fails:
+                break
+            batch = self._disjoint_batches(fails)[0]  # largest disjoint set
+            with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+                got = list(pool.map(
+                    lambda e, i=[0]: self._shake_one(
+                        e, seed + r * 104729 + hash(e[0]) % 9973),
+                    batch))
+            improved = sum(got)
+            if progress and (r % 5 == 0 or improved):
+                progress(0, 0,
+                         f"  pshake round {r+1}: {len(batch)} parallel, "
+                         f"+{improved} fixed, {len(self.result.failed)} left",
+                         self.result)
+            rejects = 0 if improved else rejects + 1
+            if rejects >= 12:
+                break
 
     # ---------------- endgame --------------------------------------------
     ENDGAME_WINDOWS = (200.0, 350.0)  # eviction radius escalation, mil
@@ -656,10 +783,11 @@ class Router:
         self._retry_failed_pairs(self.RIP_PASSES - 1, rip_counts, progress)
 
     def _rip_net(self, net_name: str):
-        self.result.traces = [t for t in self.result.traces if t.net != net_name]
-        self.result.vias = [v for v in self.result.vias if v.net != net_name]
-        self.result.failed = [f for f in self.result.failed if f[0] != net_name]
-        self.result.routed_edges -= self.result.edges_by_net.pop(net_name, 0)
+        with self._result_lock:
+            self.result.traces = [t for t in self.result.traces if t.net != net_name]
+            self.result.vias = [v for v in self.result.vias if v.net != net_name]
+            self.result.failed = [f for f in self.result.failed if f[0] != net_name]
+            self.result.routed_edges -= self.result.edges_by_net.pop(net_name, 0)
         self.ws.remove_net_wiring(net_name)
 
     def _diagnose_blockers(self, net: Net, pad_a, pad_b) -> set[str]:
@@ -1076,6 +1204,7 @@ class Router:
 
     # ---------------- single connection ---------------------------------
     OPT_MARGIN = 0.3  # optimistic A* margin (step units); exact check is truth
+    LAYER_PENALTY = 8.0  # planar mode: per-cell cost of an off-assigned-layer
     NECK_RADIUS = 35.0  # mil around own pads where neck-down applies
     WIDTH_STEP = 3.93701  # 0.1 mm: width reductions happen in these steps
 
@@ -1330,6 +1459,10 @@ class Router:
         wx, wy = x1 - x0 + 1, y1 - y0 + 1
         nl = len(ws.layers)
 
+        # planar mode: a net PREFERS its assigned routing layer(s) — off-
+        # layer cells cost a per-cell penalty (soft), so a net stays on its
+        # layer where it can and detours (via) only when it must
+        pref = getattr(net, "pref_layers", None)
         trav = np.empty((nl, wy, wx), dtype=bool)
         goal_mask = np.empty((nl, wy, wx), dtype=bool)
         for li, layer in enumerate(ws.layers):
@@ -1379,6 +1512,12 @@ class Router:
                 b = self._corridor_bias.get(layer)
                 if b is not None:
                     cong[li] += b[y0 : y1 + 1, x0 : x1 + 1]
+        if pref is not None:
+            # planar mode: per-cell penalty for straying off the net's
+            # assigned layer(s) — keeps it planar but allows via detours
+            for li, layer in enumerate(ws.layers):
+                if layer not in pref:
+                    cong[li] += self.LAYER_PENALTY
 
         layer_stride = wy * wx
         start_states = np.array(
@@ -1826,27 +1965,35 @@ class Router:
 
     def _clear_segment(self, p, q, d_layer, own_layer, req) -> bool:
         ws = self.ws
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        length = math.hypot(dx, dy)
-        n = max(2, int(length / (ws.step * 0.5)) + 1)
-        for t in np.linspace(0.0, 1.0, n):
-            x, y = p[0] + dx * t, p[1] + dy * t
-            ix, iy = ws.to_cell(x, y)
-            if d_layer[iy, ix] < req and not own_layer[iy, ix]:
-                return False
-        return True
+        return seg_clear(
+            p[0], p[1], q[0], q[1], d_layer, own_layer, req,
+            ws.x0, ws.y0, ws.step, ws.nx, ws.ny,
+        )
 
     def _string_pull(self, pts, d_layer, own_layer, req, exact_check=None):
-        """Greedy line-of-sight shortcutting; optional exact-geometry check."""
+        """Greedy line-of-sight shortcutting; optional exact-geometry check.
+        The no-exact-check path (the hot one during search) runs entirely in
+        a nogil numba kernel so parallel routing isn't serialized by the
+        Python interpreter lock."""
         if len(pts) <= 2:
             return pts
+        ws = self.ws
+        if exact_check is None:
+            arr = np.asarray(pts, dtype=np.float64)
+            keep = string_pull(
+                np.ascontiguousarray(arr[:, 0]),
+                np.ascontiguousarray(arr[:, 1]),
+                d_layer, own_layer, float(req),
+                ws.x0, ws.y0, ws.step, ws.nx, ws.ny,
+            )
+            return [pts[int(k)] for k in keep]
         out = [pts[0]]
         i = 0
         while i < len(pts) - 1:
             j = len(pts) - 1
             while j > i + 1:
                 if self._clear_segment(pts[i], pts[j], d_layer, own_layer, req) and (
-                    exact_check is None or exact_check(pts[i], pts[j])
+                    exact_check(pts[i], pts[j])
                 ):
                     break
                 j -= 1

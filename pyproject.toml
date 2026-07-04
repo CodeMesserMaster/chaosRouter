@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chaosrouter"
-version = "0.2.3"
+version = "0.2.4"
 description = "chaosRouter — a curved-trace PCB autorouter for Specctra DSN exports (DipTrace and any DSN-capable CAD)"
 readme = "README.md"
 license = { text = "MIT" }

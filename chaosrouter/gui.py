@@ -103,23 +103,86 @@ class BoardLoader(QThread):
 
 # ---------------------------------------------------------------- board view
 class BoardView(QGraphicsView):
-    """Vector pan/zoom board view with live copper animation."""
+    """Pan/zoom board view with a live, glowing, breathing copper animation
+    — smooth bezier traces with layered glow that fade in as they route and
+    pulse softly, like old bezier screensavers."""
+
+    GLOW = True  # glowing animated rendering (vs flat lines)
 
     def __init__(self):
         super().__init__()
         self.setScene(QGraphicsScene())
-        self.setRenderHints(QPainter.Antialiasing)
+        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.scale(1, -1)  # PCB y-up
         self.layer_color: dict[str, QColor] = {}
         self.net_items: dict[str, list] = {}
         self._loaded = False
+        # animation state
+        self._glow_layers = []       # outer-glow items to breathe
+        self._fading = []            # [ [group, frame, target], ... ]
+        self._phase = 0.0
+        from PySide6.QtCore import QTimer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)        # ~30 fps
 
     def color_for(self, layer: str) -> QColor:
         if layer not in self.layer_color:
             c = QColor(LAYER_COLORS[len(self.layer_color) % len(LAYER_COLORS)])
             self.layer_color[layer] = c
         return self.layer_color[layer]
+
+    @staticmethod
+    def _bezier(pts):
+        """Catmull-Rom smoothed cubic-bezier path through the points."""
+        path = QPainterPath(QPointF(*pts[0]))
+        n = len(pts)
+        if n < 3:
+            for p in pts[1:]:
+                path.lineTo(p[0], p[1])
+            return path
+        for i in range(1, n):
+            p0 = pts[i - 2] if i >= 2 else pts[i - 1]
+            p1 = pts[i - 1]
+            p2 = pts[i]
+            p3 = pts[i + 1] if i + 1 < n else pts[i]
+            c1x = p1[0] + (p2[0] - p0[0]) / 6.0
+            c1y = p1[1] + (p2[1] - p0[1]) / 6.0
+            c2x = p2[0] - (p3[0] - p1[0]) / 6.0
+            c2y = p2[1] - (p3[1] - p1[1]) / 6.0
+            path.cubicTo(c1x, c1y, c2x, c2y, p2[0], p2[1])
+        return path
+
+    def _tick(self):
+        import math
+        self._phase += 0.045
+        breath = 0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._phase))
+        live = []
+        for it, base in self._glow_layers:
+            try:
+                if it.scene() is None:
+                    continue
+                it.setOpacity(base * breath)
+                live.append((it, base))
+            except RuntimeError:
+                continue
+        self._glow_layers = live
+        still = []
+        for entry in self._fading:
+            grp, f, target = entry
+            try:
+                if grp.scene() is None:
+                    continue
+                f += 1
+                grp.setOpacity(min(1.0, target * (f / 12.0)))
+            except (RuntimeError, Exception):
+                continue
+            if f < 12:
+                entry[1] = f
+                still.append(entry)
+        self._fading = still
 
     def load_board(self, board):
         """Static content: outline + pads."""
@@ -158,16 +221,47 @@ class BoardView(QGraphicsView):
     def add_trace(self, net: str, layer: str, pts, width: float):
         if not pts:
             return
-        path = QPainterPath(QPointF(*pts[0]))
-        for x, y in pts[1:]:
-            path.lineTo(x, y)
-        pen = QPen(self.color_for(layer), max(width, 1.0))
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        it = self.scene().addPath(path, pen)
-        it.setZValue(3)
-        it.setOpacity(0.9)
-        self.net_items.setdefault(net, []).append(it)
+        if not self.GLOW:
+            path = QPainterPath(QPointF(*pts[0]))
+            for x, y in pts[1:]:
+                path.lineTo(x, y)
+            pen = QPen(self.color_for(layer), max(width, 1.0))
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            it = self.scene().addPath(path, pen)
+            it.setZValue(3)
+            it.setOpacity(0.9)
+            self.net_items.setdefault(net, []).append(it)
+            return
+        from PySide6.QtWidgets import QGraphicsItemGroup
+
+        col = self.color_for(layer)
+        bright = QColor(col).lighter(150)
+        path = self._bezier(pts)
+        w = max(width, 1.2)
+        grp = QGraphicsItemGroup()
+        grp.setOpacity(0.0)
+        # layered glow: wide+faint -> narrow+bright core
+        for mult, alpha, c, breathe in (
+            (6.0, 0.10, col, True),
+            (3.2, 0.20, col, True),
+            (1.7, 0.42, bright, False),
+            (1.0, 0.98, bright, False),
+        ):
+            pen = QPen(QColor(c), w * mult)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            from PySide6.QtWidgets import QGraphicsPathItem
+            pit = QGraphicsPathItem(path)
+            pit.setPen(pen)
+            pit.setOpacity(alpha)
+            grp.addToGroup(pit)
+            if breathe:
+                self._glow_layers.append((pit, alpha))
+        grp.setZValue(3)
+        self.scene().addItem(grp)
+        self._fading.append([grp, 0, 1.0])
+        self.net_items.setdefault(net, []).append(grp)
 
     def add_via(self, net: str, x: float, y: float, dia: float):
         r = dia / 2

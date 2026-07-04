@@ -85,3 +85,52 @@ def erode_disk(mask, r_cells):
         for x in range(nx):
             out[y, x] = sq[y, x] > r2
     return out
+
+
+@njit(cache=True, nogil=True)
+def seg_clear(px, py, qx, qy, d_layer, own_layer, req, x0, y0, step, nx, ny):
+    """True if the segment p->q stays clear (distance-field >= req, or own
+    copper) at every sample. Fully nogil so callers parallelize."""
+    dx = qx - px
+    dy = qy - py
+    length = (dx * dx + dy * dy) ** 0.5
+    n = max(2, int(length / (step * 0.5)) + 1)
+    for k in range(n):
+        t = k / (n - 1)
+        x = px + dx * t
+        y = py + dy * t
+        ix = int(round((x - x0) / step))
+        iy = int(round((y - y0) / step))
+        if ix < 0:
+            ix = 0
+        elif ix >= nx:
+            ix = nx - 1
+        if iy < 0:
+            iy = 0
+        elif iy >= ny:
+            iy = ny - 1
+        if d_layer[iy, ix] < req and not own_layer[iy, ix]:
+            return False
+    return True
+
+
+@njit(cache=True, nogil=True)
+def string_pull(xs, ys, d_layer, own_layer, req, x0, y0, step, nx, ny):
+    """Greedy line-of-sight shortcutting, entirely nogil. Returns the kept
+    point indices (into xs/ys)."""
+    m = len(xs)
+    out = np.empty(m, dtype=np.int64)
+    out[0] = 0
+    o = 1
+    i = 0
+    while i < m - 1:
+        j = m - 1
+        while j > i + 1:
+            if seg_clear(xs[i], ys[i], xs[j], ys[j], d_layer, own_layer,
+                         req, x0, y0, step, nx, ny):
+                break
+            j -= 1
+        out[o] = j
+        o += 1
+        i = j
+    return out[:o]

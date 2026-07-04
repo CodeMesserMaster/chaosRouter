@@ -50,6 +50,7 @@ class Workspace:
         self.copper: dict[str, list] = {layer: [] for layer in self.layers}
         # exempt-mask cache per net being routed: {(net, r_cells): (masks, pad_cells, r)}
         self._exempt_cache: dict = {}
+        self._pad_corridor_cache: dict = {}  # static per-net pad escape cells
         # guards copper registry, STRtrees, owner mutation, exempt cache
         self.lock = threading.RLock()
         self._trees: dict[str, object] = {}
@@ -446,10 +447,27 @@ class Workspace:
         else:
             for layer in self.layers:
                 out[layer] = erode_disk(self.owner[layer] == nid, r_cells)
+        # own-pad escape corridors are STATIC (pads never move) — compute
+        # per (net, width) once and reuse; only the eroded-trace part above
+        # changes as copper is added
+        pad_cells = self._own_pad_corridors(net, width)
+        for layer in self.layers:
+            pys, pxs = pad_cells[layer]
+            if len(pys):
+                out[layer][pys, pxs] = True
+        with self.lock:
+            self._exempt_cache[key] = (out, pad_cells, r_cells)
+        return out
+
+    def _own_pad_corridors(self, net: str, width: float):
+        """Static per-(net,width) pad-escape cells: pad polygons shrunk by
+        width/2 (corridor) plus each pad center. Cached — pads don't move."""
+        wkey = round(width, 4)
+        cache = self._pad_corridor_cache.setdefault(net, {})
+        if wkey in cache:
+            return cache[wkey]
         pad_cells = {layer: [[], []] for layer in self.layers}
-        for pad in self.board.pads.values():
-            if pad.net != net:
-                continue
+        for pad in self._pads_of_net(net):
             ix, iy = self.to_cell(pad.x, pad.y)
             for layer in self.layers:
                 if layer not in pad.layers():
@@ -459,19 +477,27 @@ class Workspace:
                     shrunk = geom.buffer(-width / 2 - 0.05)
                     if not shrunk.is_empty:
                         iys, ixs = self._cells_in_geom(shrunk, grow=0)
-                        out[layer][iys, ixs] = True
                         pad_cells[layer][0].extend(iys.tolist())
                         pad_cells[layer][1].extend(ixs.tolist())
-                out[layer][iy, ix] = True
                 pad_cells[layer][0].append(iy)
                 pad_cells[layer][1].append(ix)
-        pad_cells = {
+        out = {
             layer: (np.array(v[0], dtype=int), np.array(v[1], dtype=int))
             for layer, v in pad_cells.items()
         }
-        with self.lock:
-            self._exempt_cache[key] = (out, pad_cells, r_cells)
+        cache[wkey] = out
         return out
+
+    def _pads_of_net(self, net: str):
+        """Own pads by net (indexed once) — avoids scanning all pads."""
+        idx = getattr(self, "_pads_by_net_idx", None)
+        if idx is None:
+            idx = {}
+            for pad in self.board.pads.values():
+                if pad.net:
+                    idx.setdefault(pad.net, []).append(pad)
+            self._pads_by_net_idx = idx
+        return idx.get(net, ())
 
     def _patch_exempt(self, net: str, geom, layers):
         """Regionally refresh the cached exempt mask after own copper grew.
