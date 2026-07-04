@@ -30,7 +30,9 @@ class Workspace:
         self.y0 = miny - margin
         self.nx = int(np.ceil((maxx - minx + 2 * margin) / step)) + 1
         self.ny = int(np.ceil((maxy - miny + 2 * margin) / step)) + 1
-        self.layers = list(board.layers)
+        # route signals ONLY on signal layers — power/plane layers carry
+        # high current and are off-limits (handled as pours by the CAD)
+        self.layers = list(getattr(board, "signal_layers", None) or board.layers)
         self.owner = {
             layer: np.full((self.ny, self.nx), FREE, dtype=np.int32) for layer in self.layers
         }

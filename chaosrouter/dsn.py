@@ -104,7 +104,19 @@ def load_dsn(path: str) -> Board:
                 boundary_poly = Polygon(coords)
     board.outline = boundary_poly or boundary_rect
 
-    board.layers = [n[1] for n in sexp.find_all(structure, "layer")]
+    layer_nodes = sexp.find_all(structure, "layer")
+    board.layers = [n[1] for n in layer_nodes]
+    # layer types: "power" == high-current plane (NOT routable for signals).
+    # Everything else (mixed/signal) is a routable signal layer. The router
+    # must only route signals on signal_layers; planes are handled as copper
+    # pours by the CAD.
+    board.layer_type = {}
+    for n in layer_nodes:
+        tnode = sexp.find(n, "type")
+        board.layer_type[n[1]] = tnode[1] if tnode and len(tnode) > 1 else "signal"
+    board.signal_layers = [
+        ly for ly in board.layers if board.layer_type.get(ly) != "power"
+    ]
     via_node = sexp.find(structure, "via")
     if via_node:
         board.via_padstacks = [t for t in via_node[1:] if not isinstance(t, list)]
