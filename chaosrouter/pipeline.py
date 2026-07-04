@@ -29,6 +29,7 @@ def run_pipeline(
     method: str = "chaos",
     via_map: dict | None = None,
     persist_seconds: float = 0.0,
+    curve_method: str = "fillet",
 ) -> dict:
     """Route a DSN end to end. `progress(line: str)` receives log lines;
     `on_add`/`on_rip` receive live copper events (for GUI animation).
@@ -60,6 +61,8 @@ def run_pipeline(
     )
 
     def rp(i, n, name, res):
+        if isinstance(i, int) and n:
+            say(f"@P|{i}|{n}")  # machine-readable progress for the GUI bar
         if (isinstance(i, int) and n and (i % 10 == 0 or i == n)) or n == 0:
             say(
                 f"[{i}/{n}] {name}  edges={res.routed_edges} "
@@ -70,6 +73,9 @@ def run_pipeline(
         from .pathfinder import route_all_pathfinder
 
         result = route_all_pathfinder(router, progress=rp)
+    elif method == "simple":
+        # fast first-pass only: no rip-up / shake / endgame completion tail
+        result = router.route_all(progress=rp, rip_up=False)
     else:
         result = router.route_all(progress=rp, persist_seconds=persist_seconds)
     t_route = time.time() - t0
@@ -81,10 +87,25 @@ def run_pipeline(
     ws.on_add = ws.on_rip = None  # style passes re-register copper
     pruned = router.prune_open_stubs()
     grafts = router.beautify_exits()
-    fat = router.fatten_pad_entries()
-    say(f"style: {pruned} stubs pruned, {grafts} exits grafted, {fat} entries fattened")
-    say("filleting corners into arcs ...")
-    fillet_result(result, ws, board, r_target=fillet_r)
+    if curve_method == "relax":
+        # field relaxation IS the curve engine (fast hybrid: grid-field
+        # forces + exact legality). Teardrops are SKIPPED here — the fatten
+        # pass fragments traces and would reintroduce corners into the
+        # smooth curves.
+        from .fastfield import relax_hybrid
+
+        say("relaxing traces into curves (fast field solver) ...")
+        relax_hybrid(router, result, iters=90, progress=say)
+        # fillet the traces relax couldn't flow (boxed-in): flowing curves
+        # in the open, tangent-arc fillets in tight spots — never angular
+        fillet_result(result, ws, board, r_target=fillet_r)
+        say(f"style: {pruned} stubs pruned, {grafts} exits grafted, "
+            "relaxed + filleted (teardrops skipped in relax mode)")
+    else:
+        fat = router.fatten_pad_entries()
+        say(f"style: {pruned} stubs pruned, {grafts} exits grafted, {fat} fattened")
+        say("filleting corners into arcs ...")
+        fillet_result(result, ws, board, r_target=fillet_r)
 
     pairs = check_pairs(board, result)
     for p_name, n_name, pct, unc in pairs:

@@ -25,9 +25,14 @@ def main():
     ap.add_argument("--fillet", type=float, default=25.0, help="max fillet radius, mil")
     ap.add_argument("--no-drc", action="store_true")
     ap.add_argument(
-        "--method", choices=("chaos", "pathfinder"), default="chaos",
+        "--method", choices=("chaos", "pathfinder", "simple"), default="chaos",
         help="routing method: guided-chaos (default) or FPGA-style "
              "pathfinder negotiated congestion",
+    )
+    ap.add_argument(
+        "--curves", choices=("fillet", "relax"), default="fillet",
+        help="curve engine: tangent-arc fillet (default) or experimental "
+             "field relaxation (physics smoothing)",
     )
     ap.add_argument("--stream", action="store_true", help="emit live copper events")
     ap.add_argument(
@@ -93,6 +98,7 @@ def main():
         method=args.method,
         via_map=dict(m.split("=", 1) for m in args.via_map),
         persist_seconds=args.persist_min * 60.0,
+        curve_method=args.curves,
         avoid_padstacks=tuple(args.avoid_via) if args.avoid_via else (),
         include_geometry=bool(args.stats_json),
     )

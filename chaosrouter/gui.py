@@ -20,8 +20,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame,
     QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-    QScrollArea, QTabWidget, QVBoxLayout, QWidget,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
+    QPushButton, QScrollArea, QStatusBar, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .version import APP_NAME, HISTORY, UPDATE_URL, __version__
@@ -78,6 +78,17 @@ QTabBar::tab {{
 QTabBar::tab:selected {{ color: {TEXT}; border-bottom: 2px solid {ACCENT}; }}
 QScrollArea {{ border: none; }}
 QGraphicsView {{ background: {BG}; border: none; border-radius: 10px; }}
+QStatusBar {{ background: {BG}; border: none; }}
+QStatusBar::item {{ border: none; }}
+QProgressBar {{
+    background: {PANEL2}; border: 1px solid #26262e; border-radius: 8px;
+    height: 16px; text-align: center; color: {MUTED}; font-size: 10px;
+}}
+QProgressBar::chunk {{
+    border-radius: 7px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {ACCENT2}, stop:1 {ACCENT});
+}}
 """
 
 
@@ -120,13 +131,13 @@ class BoardView(QGraphicsView):
         self.net_items: dict[str, list] = {}
         self._loaded = False
         # animation state
-        self._glow_layers = []       # outer-glow items to breathe
+        self._glow_layers = []       # (item, base_opacity, phase_offset)
         self._fading = []            # [ [group, frame, target], ... ]
         self._phase = 0.0
         from PySide6.QtCore import QTimer
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(33)        # ~30 fps
+        self._timer.start(22)        # ~45 fps for fluid motion
 
     def color_for(self, layer: str) -> QColor:
         if layer not in self.layer_color:
@@ -157,15 +168,20 @@ class BoardView(QGraphicsView):
 
     def _tick(self):
         import math
-        self._phase += 0.045
-        breath = 0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._phase))
+        # gentle, slightly faster global phase; each trace carries its own
+        # spatial offset so the glow flows across the board as a wave rather
+        # than pulsing in unison (that uniform blink read as "itchy")
+        self._phase += 0.05
+        p = self._phase
+        sin = math.sin
         live = []
-        for it, base in self._glow_layers:
+        for it, base, off in self._glow_layers:
             try:
                 if it.scene() is None:
                     continue
-                it.setOpacity(base * breath)
-                live.append((it, base))
+                # shallow, smooth breath (0.72..1.0 of base) — no harsh dips
+                it.setOpacity(base * (0.72 + 0.28 * (0.5 + 0.5 * sin(p + off))))
+                live.append((it, base, off))
             except RuntimeError:
                 continue
         self._glow_layers = live
@@ -176,10 +192,11 @@ class BoardView(QGraphicsView):
                 if grp.scene() is None:
                     continue
                 f += 1
-                grp.setOpacity(min(1.0, target * (f / 12.0)))
-            except (RuntimeError, Exception):
+                t = min(1.0, f / 16.0)
+                grp.setOpacity(target * t * t * (3.0 - 2.0 * t))  # smoothstep
+            except RuntimeError:
                 continue
-            if f < 12:
+            if f < 16:
                 entry[1] = f
                 still.append(entry)
         self._fading = still
@@ -239,6 +256,10 @@ class BoardView(QGraphicsView):
         bright = QColor(col).lighter(150)
         path = self._bezier(pts)
         w = max(width, 1.2)
+        # spatial phase offset: the breath wave sweeps diagonally across the
+        # board so neighbouring traces glow slightly out of step (a flow, not
+        # a synchronized blink)
+        off = (pts[0][0] + pts[0][1]) * 0.006
         grp = QGraphicsItemGroup()
         grp.setOpacity(0.0)
         # layered glow: wide+faint -> narrow+bright core
@@ -257,7 +278,7 @@ class BoardView(QGraphicsView):
             pit.setOpacity(alpha)
             grp.addToGroup(pit)
             if breathe:
-                self._glow_layers.append((pit, alpha))
+                self._glow_layers.append((pit, alpha, off))
         grp.setZValue(3)
         self.scene().addItem(grp)
         self._fading.append([grp, 0, 1.0])
@@ -354,6 +375,19 @@ class Main(QMainWindow):
         self.last_stats: dict | None = None
         self._stats_path = ""
 
+        # progress bar along the bottom (fills as connections route)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("prog")
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFixedHeight(16)
+        self.progress.setTextVisible(True)
+        self.progress.setFormat("")
+        sb = QStatusBar()
+        sb.setSizeGripEnabled(False)
+        sb.addPermanentWidget(self.progress, 1)
+        self.setStatusBar(sb)
+
         root = QWidget()
         self.setCentralWidget(root)
         outer = QHBoxLayout(root)
@@ -394,9 +428,15 @@ class Main(QMainWindow):
         grid = QGridLayout()
         grid.addWidget(QLabel("Method"), 2, 0)
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["Guided-Chaos (default)", "PathFinder (experimental)"])
+        self.method_combo.addItems([
+            "Guided-Chaos (default)",
+            "PathFinder (experimental)",
+            "Simple (fast first-pass)",
+        ])
+        self._methods = ["chaos", "pathfinder", "simple"]
+        saved = self.settings.value("method", "chaos")
         self.method_combo.setCurrentIndex(
-            1 if self.settings.value("method", "chaos") == "pathfinder" else 0
+            self._methods.index(saved) if saved in self._methods else 0
         )
         grid.addWidget(self.method_combo, 2, 1)
         grid.addWidget(QLabel("Grid step (mil)"), 0, 0)
@@ -534,8 +574,9 @@ class Main(QMainWindow):
         ]
         if self.strict_chk.isChecked():
             args.append("--strict-width")
-        if self.method_combo.currentIndex() == 1:
-            args += ["--method", "pathfinder"]
+        method = self._methods[self.method_combo.currentIndex()]
+        if method != "chaos":
+            args += ["--method", method]
         if getattr(sys, "frozen", False):
             return sys.executable, args
         launcher = os.path.join(
@@ -557,8 +598,7 @@ class Main(QMainWindow):
         self.settings.setValue("fillet", self.fillet_spin.value())
         self.settings.setValue("strict", self.strict_chk.isChecked())
         self.settings.setValue(
-            "method",
-            "pathfinder" if self.method_combo.currentIndex() == 1 else "chaos",
+            "method", self._methods[self.method_combo.currentIndex()]
         )
         out_base = os.path.join(
             os.path.dirname(dsn), self.out_edit.text().strip() or "routed"
@@ -569,6 +609,8 @@ class Main(QMainWindow):
         self.go.setEnabled(False)
         self.cancel_btn.setVisible(True)
         self.save_btn.setEnabled(False)
+        self.progress.setValue(0)
+        self.progress.setFormat("routing ...")
         self.status.setText("routing ... watch the board")
         self.tabs.setCurrentWidget(self.view)
 
@@ -607,6 +649,16 @@ class Main(QMainWindow):
                     pass
             elif line.startswith("@R|"):
                 self.view.rip_net(line[3:])
+            elif line.startswith("@P|"):
+                try:
+                    _, i, n = line.split("|", 2)
+                    i, n = int(i), int(n)
+                    if n:
+                        pct = max(0, min(100, round(100 * i / n)))
+                        self.progress.setValue(pct)
+                        self.progress.setFormat(f"{i}/{n} connections  ·  {pct}%")
+                except ValueError:
+                    pass
             elif line.strip():
                 self.log.appendPlainText(line)
 
@@ -627,6 +679,10 @@ class Main(QMainWindow):
         self.last_stats = stats
         self.save_btn.setEnabled(True)
         r = stats["routing"]
+        self.progress.setValue(100)
+        self.progress.setFormat(
+            f"done · {r['routed']}/{r['total']} connections"
+        )
         self.status.setText(
             f"done: {r['routed']}/{r['total']} in {r['seconds']:.0f}s — "
             f"session written to {os.path.basename(stats['ses'])}"
