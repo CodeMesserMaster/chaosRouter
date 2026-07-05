@@ -1524,16 +1524,30 @@ class Router:
             sorted({li * layer_stride + iy * wx + ix for li, iy, ix in starts}),
             dtype=np.int64,
         )
-        found, parent = astar_jit(
-            trav.reshape(-1),
-            goal_mask.reshape(-1),
-            via_ok.reshape(-1),
-            cong.reshape(-1),
-            start_states,
-            nl, wy, wx,
-            step, self.via_cost,
-            g_ix0, g_ix1, g_iy0, g_iy1,
-        )
+        grain_map = getattr(self, "_grain", None)
+        if grain_map is not None:
+            # Manhattan mode: per-layer grain (H/V), orthogonal-only search
+            from .astar_kernel import astar_grain
+            grain = np.array(
+                [grain_map.get(l, -1) for l in ws.layers], dtype=np.int8
+            )
+            found, parent = astar_grain(
+                trav.reshape(-1), goal_mask.reshape(-1), via_ok.reshape(-1),
+                cong.reshape(-1), start_states, nl, wy, wx, step, self.via_cost,
+                g_ix0, g_ix1, g_iy0, g_iy1,
+                grain, getattr(self, "_grain_pen", 3.0),
+            )
+        else:
+            found, parent = astar_jit(
+                trav.reshape(-1),
+                goal_mask.reshape(-1),
+                via_ok.reshape(-1),
+                cong.reshape(-1),
+                start_states,
+                nl, wy, wx,
+                step, self.via_cost,
+                g_ix0, g_ix1, g_iy0, g_iy1,
+            )
         if found < 0:
             return None
         path = []

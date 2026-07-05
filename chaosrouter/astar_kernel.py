@@ -298,3 +298,118 @@ def astar(
                 break
 
     return found, parent
+
+
+@njit(cache=True, nogil=True)
+def astar_grain(
+    trav, goal, via_ok, cong, starts,
+    nl, wy, wx, step, via_cost,
+    g_ix0, g_ix1, g_iy0, g_iy1,
+    grain,       # int8[nl]: 0 = prefer horizontal, 1 = prefer vertical, -1 none
+    grain_pen,   # extra cost (x step) for a move against the layer's grain
+):
+    """Manhattan-structured A*: orthogonal moves only (no diagonals), and a
+    move against a layer's preferred axis costs `grain_pen`*step extra — so
+    each layer routes mostly in its grain direction and switches layers (via)
+    to change direction. Produces the clean H/V lane structure that keeps
+    dense boards routable. Same via/goal/heuristic logic as astar."""
+    n_states = nl * wy * wx
+    stride = wy * wx
+    gcost = np.full(n_states, np.inf, dtype=np.float64)
+    parent = np.full(n_states, -1, dtype=np.int64)
+    cap = 4 * n_states + 64
+    keys = np.empty(cap, dtype=np.float64)
+    vals = np.empty(cap, dtype=np.int64)
+    size = 0
+    gp = grain_pen * step
+
+    for k in range(starts.shape[0]):
+        s = starts[k]
+        if trav[s] and gcost[s] > 0.0:
+            gcost[s] = 0.0
+            rem = s % stride
+            iy = rem // wx
+            ix = rem % wx
+            dx = max(0, max(g_ix0 - ix, ix - g_ix1))
+            dy = max(0, max(g_iy0 - iy, iy - g_iy1))
+            h = (dx + dy) * step
+            size = _heap_push(keys, vals, size, h, s)
+
+    found = np.int64(-1)
+    while size > 0:
+        f, s, size = _heap_pop(keys, vals, size)
+        li = s // stride
+        rem = s % stride
+        iy = rem // wx
+        ix = rem % wx
+        g = gcost[s]
+        dxh = max(0, max(g_ix0 - ix, ix - g_ix1))
+        dyh = max(0, max(g_iy0 - iy, iy - g_iy1))
+        h = (dxh + dyh) * step
+        if f > g + h + 1e-9:
+            continue
+        if goal[s]:
+            found = s
+            break
+        gr = grain[li]
+        for m in range(4):
+            if m == 0:
+                dx, dy = 1, 0
+            elif m == 1:
+                dx, dy = -1, 0
+            elif m == 2:
+                dx, dy = 0, 1
+            else:
+                dx, dy = 0, -1
+            cost = step
+            if gr == 0 and dy != 0:
+                cost += gp
+            elif gr == 1 and dx != 0:
+                cost += gp
+            nx = ix + dx
+            ny = iy + dy
+            if nx < 0 or ny < 0 or nx >= wx or ny >= wy:
+                continue
+            ns = s + dy * wx + dx
+            if goal[ns]:
+                parent[ns] = s
+                found = ns
+                break
+            if not trav[ns]:
+                continue
+            ng = g + cost + cong[ns]
+            if ng < gcost[ns] - 1e-9:
+                gcost[ns] = ng
+                parent[ns] = s
+                hx = max(0, max(g_ix0 - nx, nx - g_ix1))
+                hy = max(0, max(g_iy0 - ny, ny - g_iy1))
+                nh = (hx + hy) * step
+                if size >= cap - 1:
+                    size = _compact(keys, vals, size, gcost)
+                if size < cap - 1:
+                    size = _heap_push(keys, vals, size, ng + nh, ns)
+        if found >= 0:
+            break
+        if via_ok[rem]:
+            for lj in range(nl):
+                if lj == li:
+                    continue
+                ns = lj * stride + rem
+                if goal[ns]:
+                    parent[ns] = s
+                    found = ns
+                    break
+                if not trav[ns]:
+                    continue
+                ng = g + via_cost + cong[ns]
+                if ng < gcost[ns] - 1e-9:
+                    gcost[ns] = ng
+                    parent[ns] = s
+                    nh = (dxh + dyh) * step
+                    if size >= cap - 1:
+                        size = _compact(keys, vals, size, gcost)
+                    if size < cap - 1:
+                        size = _heap_push(keys, vals, size, ng + nh, ns)
+            if found >= 0:
+                break
+    return found, parent
