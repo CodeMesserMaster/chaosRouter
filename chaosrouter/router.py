@@ -1194,6 +1194,15 @@ class Router:
 
     def _add_pad_to_target(self, pad, target, target_centers):
         ws = self.ws
+        esc = getattr(self, "_escape", None)
+        if esc and pad.pin_id in esc:
+            # fanned-out pad: its tree terminal is the inner-layer breakout
+            bx, by, blayer = esc[pad.pin_id]
+            li = ws.layers.index(blayer)
+            ix, iy = ws.to_cell(bx, by)
+            target[blayer][iy, ix] = True
+            target_centers.append((li, iy, ix))
+            return
         cx, cy = ws.to_cell(pad.x, pad.y)
         for li, layer in enumerate(ws.layers):
             if layer not in pad.layers():
@@ -1427,9 +1436,22 @@ class Router:
         return True
 
     def _pad_cells(self, pad, window):
-        """(cells, centers): window-local (layer, iy, ix) source cells."""
+        """(cells, centers): window-local (layer, iy, ix) source cells.
+
+        If the pad has been FANNED OUT (escaped to an inner-layer breakout via
+        a committed pad->via escape), routing starts from the breakout on the
+        inner layer instead of the trapped pad — the escape is fixed copper."""
         ws = self.ws
         x0, y0, x1, y1 = window
+        esc = getattr(self, "_escape", None)
+        if esc and pad.pin_id in esc:
+            bx, by, blayer = esc[pad.pin_id]
+            li = ws.layers.index(blayer)
+            ix, iy = ws.to_cell(bx, by)
+            if x0 <= ix <= x1 and y0 <= iy <= y1:
+                c = [(li, iy - y0, ix - x0)]
+                return c, list(c)
+            return [], []
         cells = []
         for li, layer in enumerate(ws.layers):
             if layer not in pad.layers():
