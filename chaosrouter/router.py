@@ -839,7 +839,7 @@ class Router:
         itself may use — so blockage by pads doesn't mask rippable traces."""
         ws = self.ws
         step = ws.step
-        req = self.neck_width(net) / 2 + net.clearance + self.OPT_MARGIN * step
+        req = self.neck_width(net) / 2 + self.neck_gap(net) + self.OPT_MARGIN * step
 
         ax, ay = ws.to_cell(pad_a.x, pad_a.y)
         bx, by = ws.to_cell(pad_b.x, pad_b.y)
@@ -1262,7 +1262,7 @@ class Router:
         Power traces keep as much copper as the geometry allows."""
         w = net.width
         while w > floor_width + 1e-6:
-            if self.ws.exact_trace_ok(net.name, layer, coords, w, net.clearance):
+            if self.ws.exact_trace_ok(net.name, layer, coords, w, self._clr_for(net, w)):
                 return w
             w -= self.WIDTH_STEP
         return floor_width
@@ -1341,6 +1341,28 @@ class Router:
             return net.width
         rule = net.net_class.rules.get("neck_down_width") if net.net_class else None
         return float(rule[0]) if rule else self.board.default_width
+
+    def neck_gap(self, net: Net) -> float:
+        """Reduced clearance allowed where a trace NECKS DOWN near fine-pitch
+        pads. A high-clearance rule (e.g. a 15.7mil power/HV net) physically
+        cannot be honored between 0.65mm-pitch pins that are ~9mil apart — the
+        pads themselves already sit far closer than the rule — so a necked
+        trace at the pins uses the class neck_down_gap (or the board default),
+        and returns to FULL clearance the moment it widens out in the open."""
+        if self.strict_width:
+            return net.clearance
+        rule = net.net_class.rules.get("neck_down_gap") if net.net_class else None
+        if rule:
+            return float(rule[0])
+        return min(net.clearance, self.board.default_clearance)
+
+    def _clr_for(self, net: Net, width: float) -> float:
+        """Full clearance for full-width (open-board) copper; the reduced neck
+        gap for narrowed near-pad copper. Keyed on width so the open board
+        keeps its full clearance and only the pinch at the pins is relaxed."""
+        if width < net.width - 1e-6:
+            return self.neck_gap(net)
+        return net.clearance
 
     def pad_entry_width(self, pad) -> float:
         """Copper width (narrow dimension) of a pad."""
@@ -1435,7 +1457,7 @@ class Router:
             # pessimistic pass as fallback (forces a detour)
             for edt_margin in (self.OPT_MARGIN, self.edt_margin):
                 req = net.width / 2 + net.clearance + edt_margin * step
-                req_neck = nwidth / 2 + net.clearance + edt_margin * step
+                req_neck = nwidth / 2 + self.neck_gap(net) + edt_margin * step
                 via_req = via_dia / 2 + net.clearance + edt_margin * step
                 res = self._astar(
                     net, pad, target, target_centers, dist, own, req, via_req,
@@ -1464,7 +1486,7 @@ class Router:
         runs, vias = geo
         for layer, coords, width in runs:
             if len(coords) >= 2 and not self.ws.exact_trace_ok(
-                net.name, layer, coords, width, net.clearance
+                net.name, layer, coords, width, self._clr_for(net, width)
             ):
                 return False
         for x, y in vias:
@@ -1769,7 +1791,7 @@ class Router:
         exact clearance; lo is assumed to fit (the trace exists at lo)."""
         w = hi
         while w > lo + 1e-6:
-            if self.ws.exact_trace_ok(net.name, layer, coords, w, net.clearance):
+            if self.ws.exact_trace_ok(net.name, layer, coords, w, self._clr_for(net, w)):
                 return w
             w -= self.WIDTH_STEP
         return lo
@@ -1937,7 +1959,7 @@ class Router:
             for f in (1.0, 0.7, 0.5):
                 tip = (px + ax * L * f, py + ay * L * f)
                 if not self.ws.exact_trace_ok(
-                    net.name, layer, [pts[0], tip], width, net.clearance
+                    net.name, layer, [pts[0], tip], width, self._clr_for(net, width)
                 ):
                     continue
                 # rejoin the found path at the farthest exactly-visible vertex
@@ -1953,7 +1975,7 @@ class Router:
                     if (ax * rx + ay * ry) / lr < 0.25:  # > ~75 deg turn
                         continue
                     if self.ws.exact_trace_ok(
-                        net.name, layer, [tip, pts[k]], width, net.clearance
+                        net.name, layer, [tip, pts[k]], width, self._clr_for(net, width)
                     ):
                         return [pts[0], tip] + list(pts[k:]), k
         return pts, 0
@@ -2032,7 +2054,7 @@ class Router:
                 check = None
                 if exact:
                     check = lambda p, q, _l=layer, _w=w: ws.exact_trace_ok(
-                        net.name, _l, [p, q], _w, net.clearance
+                        net.name, _l, [p, q], _w, self._clr_for(net, _w)
                     )
                 if pinned and is_first and len(sec) > 2:
                     # keep the straight pad-exit stub intact

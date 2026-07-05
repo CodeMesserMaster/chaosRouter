@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.22"
+__version__ = "0.2.23"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,19 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.23",
+        "2026-07-05",
+        [
+            "Neck-down CLEARANCE, not just width: a high-clearance net (e.g. a "
+            "15.7mil power/HV rule) physically cannot be honored between "
+            "0.65mm-pitch IC pins that are ~9mil apart, so where the trace necks "
+            "down at the pins it now uses the class neck_down_gap (or board "
+            "default) and returns to full clearance in the open board. Root "
+            "cause of the dense-BMS wall: 91.1% -> 94.4%. Full clearance is "
+            "preserved everywhere the trace is full width.",
+        ],
+    ),
     (
         "0.2.22",
         "2026-07-05",
