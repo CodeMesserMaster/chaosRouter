@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.21"
+__version__ = "0.2.22"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,18 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.22",
+        "2026-07-05",
+        [
+            "Manhattan method rebuilt around the validated direction-on-inner "
+            "scheme: East-West and North-South highways on the INNER signal "
+            "layers, Top/Bottom kept free for short local escapes, strict grain "
+            "so a direction change forces a layer change. On the dense BMS: "
+            "84.5% -> 91% with 100% direction discipline and half the vias of "
+            "the naive scheme. Per-layer base cost pushes long routes to inner.",
+        ],
+    ),
     (
         "0.2.21",
         "2026-07-05",

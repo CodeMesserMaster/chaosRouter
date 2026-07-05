@@ -1521,6 +1521,14 @@ class Router:
             for li, layer in enumerate(ws.layers):
                 if layer not in pref:
                     cong[li] += self.LAYER_PENALTY
+        lbase = getattr(self, "_layer_base", None)
+        if lbase:
+            # per-layer base cost — used to make overflow/inner layers a last
+            # resort so Manhattan routes on the primary H/V pair first
+            for li, layer in enumerate(ws.layers):
+                c = lbase.get(layer)
+                if c:
+                    cong[li] += c
 
         layer_stride = wy * wx
         start_states = np.array(
