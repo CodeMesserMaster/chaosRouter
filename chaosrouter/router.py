@@ -440,6 +440,43 @@ class Router:
             (150.0, 500.0, 1e9), None, via_name, via_dia, record_fail=False,
         )
 
+    def _anypath(self, progress=None, rounds=2):
+        """ABSOLUTE last resort — 'just get it connected somehow'. Drops EVERY
+        structural constraint (Manhattan grain, layer preferences, orthogonal-
+        only, per-layer base costs) and makes vias near-free, then runs the
+        eviction endgame so the remaining edges can take ANY legal path through
+        the whole board on any layers with as many vias as needed. Ugly is
+        fine; a connected board beats a pretty open one. Restores all settings
+        after, so only the still-failed edges are touched."""
+        if not self.result.failed:
+            return
+        saved = (
+            getattr(self, "_grain", None),
+            getattr(self, "_layer_base", None),
+            getattr(self, "_orthogonal", False),
+            self.via_cost,
+        )
+        self._grain = None
+        self._layer_base = None
+        self._orthogonal = False
+        self.via_cost = 20.0  # vias almost free: trade vias for connectivity
+        try:
+            for _ in range(rounds):
+                before = len(self.result.failed)
+                if not before:
+                    break
+                self._rip_and_retry(progress)
+                self._endgame(progress)
+                if progress:
+                    progress(0, 0,
+                             f"any-path: {before} -> {len(self.result.failed)} left",
+                             self.result)
+                if len(self.result.failed) == before:
+                    break
+        finally:
+            (self._grain, self._layer_base,
+             self._orthogonal, self.via_cost) = saved
+
     def _endgame(self, progress=None):
         """Deterministic last resort for edges that survive rip-up and
         shaking: evict EVERY rippable net crossing the edge's neighborhood,
@@ -2017,6 +2054,23 @@ class Router:
             ws.x0, ws.y0, ws.step, ws.nx, ws.ny,
         )
 
+    @staticmethod
+    def _orthogonal_simplify(pts):
+        """Collapse collinear points, keeping only the corners — pure H/V
+        segments between turns (Manhattan mode)."""
+        if len(pts) <= 2:
+            return pts
+        out = [pts[0]]
+        for i in range(1, len(pts) - 1):
+            ax, ay = pts[i - 1]
+            bx, by = pts[i]
+            cx, cy = pts[i + 1]
+            # keep b only if the direction actually changes at it
+            if (bx - ax) * (cy - by) - (by - ay) * (cx - bx) != 0:
+                out.append(pts[i])
+        out.append(pts[-1])
+        return out
+
     def _string_pull(self, pts, d_layer, own_layer, req, exact_check=None):
         """Greedy line-of-sight shortcutting; optional exact-geometry check.
         The no-exact-check path (the hot one during search) runs entirely in
@@ -2024,6 +2078,11 @@ class Router:
         Python interpreter lock."""
         if len(pts) <= 2:
             return pts
+        if getattr(self, "_orthogonal", False):
+            # Manhattan mode: keep PURE orthogonal geometry — no diagonal
+            # line-of-sight shortcuts. Just collapse collinear runs to their
+            # corners; the fillet pass rounds those corners afterwards.
+            return self._orthogonal_simplify(pts)
         ws = self.ws
         if exact_check is None:
             arr = np.asarray(pts, dtype=np.float64)

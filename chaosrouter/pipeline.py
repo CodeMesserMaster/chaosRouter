@@ -109,6 +109,7 @@ def run_pipeline(
         # routes down onto the inner highways. Strict grain (grain_pen>via/step)
         # forces a layer change to change direction. Curved by the fillet pass.
         sig = list(getattr(board, "signal_layers", None) or board.layers)
+        router._orthogonal = True  # pure straight H/V lines; fillet rounds corners
         if len(sig) >= 4:
             inner = sig[1:-1]
             router._grain = {ly: (i % 2) for i, ly in enumerate(inner)}
