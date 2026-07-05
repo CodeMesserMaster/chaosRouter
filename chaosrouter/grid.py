@@ -405,13 +405,19 @@ class Workspace:
             ix0, iy0 = self.to_cell(bounds[0], bounds[1])
             ix1, iy1 = self.to_cell(bounds[2], bounds[3])
 
+        # Build the foreign masks under the lock: another thread's add_trace/
+        # remove_net mutates self.owner, and reading/np.isin-ing it live races
+        # (corrupt numpy op -> IndexError). The mask build is a fast COPY; the
+        # expensive EDT runs afterwards on the private copies, lock-free, so
+        # parallel routing keeps its speed.
         masks = {}
-        for layer in self.layers:
-            grid = self.owner[layer]
-            if bounds is not None:
-                grid = grid[gy0 : gy1 + 1, gx0 : gx1 + 1]
-            foreign = (grid == BLOCK) | ((grid >= 0) & ~np.isin(grid, nids))
-            masks[layer] = np.ascontiguousarray(foreign)
+        with self.lock:
+            for layer in self.layers:
+                grid = self.owner[layer]
+                if bounds is not None:
+                    grid = grid[gy0 : gy1 + 1, gx0 : gx1 + 1]
+                foreign = (grid == BLOCK) | ((grid >= 0) & ~np.isin(grid, nids))
+                masks[layer] = np.ascontiguousarray(foreign)
         fields = self._edt_layers(masks)
         if bounds is None:
             return fields
