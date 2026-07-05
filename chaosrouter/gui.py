@@ -308,6 +308,36 @@ class BoardView(QGraphicsView):
             pass
         return len(self._all_traces)
 
+    def draw_unrouted(self, edges):
+        """Show failed connections as bright red ratsnest lines (pad to pad)
+        so the user can see WHERE routing failed and adjust placement."""
+        self.clear_unrouted()
+        red = QColor("#ff2d3c")
+        for x1, y1, x2, y2, _net in edges:
+            path = QPainterPath(QPointF(x1, y1))
+            path.lineTo(x2, y2)
+            pen = QPen(red, 2.0)
+            pen.setCapStyle(Qt.RoundCap)
+            it = self.scene().addPath(path, pen)
+            it.setZValue(20)          # on top of everything
+            it.setOpacity(0.95)
+            self._unrouted_items.append(it)
+            for (mx, my) in ((x1, y1), (x2, y2)):
+                d = self.scene().addEllipse(
+                    mx - 6, my - 6, 12, 12, QPen(Qt.NoPen), QBrush(red)
+                )
+                d.setZValue(20)
+                self._unrouted_items.append(d)
+        self.viewport().update()
+
+    def clear_unrouted(self):
+        for it in getattr(self, "_unrouted_items", []):
+            try:
+                self.scene().removeItem(it)
+            except RuntimeError:
+                pass
+        self._unrouted_items = []
+
     def load_board(self, board):
         """Static content: outline + pads."""
         sc = self.scene()
@@ -422,6 +452,7 @@ class BoardView(QGraphicsView):
         self._final_mode = False
         self._all_traces = []
         self._all_vias = []
+        self._unrouted_items = []
 
     def wheelEvent(self, ev):
         if not self._loaded:
@@ -837,13 +868,24 @@ class Main(QMainWindow):
             f"done: {r['routed']}/{r['total']} in {r['seconds']:.0f}s — "
             f"session written to {os.path.basename(stats['ses'])}"
         )
-        # redraw exact final copper (style passes reshape everything)
+        # redraw the exact final copper from the authoritative stats geometry,
+        # in FINAL (clean) mode so no glow returns at the end — collect then
+        # draw once via finalize (a single clean redraw, zero glow)
         self.view.clear_copper()
+        self.view._final_mode = True
         geo = stats.get("geometry") or {}
         for net, layer, coords, width in geo.get("traces", []):
             self.view.add_trace(net, layer, [tuple(c) for c in coords], width)
         for net, x, y, dia in geo.get("vias", []):
             self.view.add_via(net, x, y, dia)
+        self.view.finalize()
+        # show unrouted connections as red ratsnest lines (placement feedback)
+        unrouted = geo.get("unrouted", [])
+        self.view.draw_unrouted(unrouted)
+        if unrouted:
+            self.status.setText(
+                self.status.text() + f"  ·  {len(unrouted)} unrouted (shown red)"
+            )
         self.populate_stats(stats)
 
     # ---- statistics tab ----------------------------------------------

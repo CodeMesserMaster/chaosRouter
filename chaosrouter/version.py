@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.19"
+__version__ = "0.2.20"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,18 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.20",
+        "2026-07-05",
+        [
+            "Unrouted connections now shown as bright red ratsnest lines in "
+            "the final board view, for placement feedback — see where routing "
+            "failed and fix placement there.",
+            "Fix glow returning at the very end: the final stats-redraw path "
+            "drew copper with glow (clear_copper reset final mode); it now "
+            "does a single clean final-mode redraw. Zero glow on finish.",
+        ],
+    ),
     (
         "0.2.19",
         "2026-07-05",

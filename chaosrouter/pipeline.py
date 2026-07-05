@@ -215,6 +215,12 @@ def run_pipeline(
                 [v.net, round(v.x, 2), round(v.y, 2), round(v.diameter, 2)]
                 for v in result.vias
             ],
+            # unrouted connections (failed edges) as pad-to-pad segments, so
+            # the GUI can show them in red for placement feedback
+            "unrouted": [
+                [round(a[0], 2), round(a[1], 2), round(b[0], 2), round(b[1], 2), net]
+                for a, b, net in un_edges
+            ],
         }
 
     return {
