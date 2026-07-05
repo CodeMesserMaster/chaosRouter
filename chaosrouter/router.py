@@ -98,8 +98,11 @@ class Router:
         from scipy.sparse.csgraph import minimum_spanning_tree
         from scipy.spatial.distance import pdist, squareform
 
+        planes = getattr(self.board, "plane_nets", frozenset())
         scored = []
         for net in self.board.nets.values():
+            if net.name in planes:
+                continue  # plane nets are poured, not routed as signal traces
             pads = self.board.pads_of_net(net)
             if len(pads) < 2:
                 continue

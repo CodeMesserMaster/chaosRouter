@@ -101,6 +101,14 @@ def run_pipeline(
         from .balanced import route_all_balanced
 
         result = route_all_balanced(router, progress=rp)
+    elif method == "manhattan":
+        # Manhattan-structured: alternating H/V grain per signal layer keeps
+        # dense boards routable (traded for a few extra vias). Curved by the
+        # fillet pass afterwards, so it still looks like chaosRouter.
+        sig = list(getattr(board, "signal_layers", None) or board.layers)
+        router._grain = {sig[i]: (i % 2) for i in range(len(sig))}
+        router._grain_pen = 5.0
+        result = router.route_all(progress=rp)
     else:
         result = router.route_all(progress=rp, persist_seconds=persist_seconds)
     t_route = time.time() - t0

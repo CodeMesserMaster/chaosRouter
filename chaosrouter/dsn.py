@@ -117,6 +117,17 @@ def load_dsn(path: str) -> Board:
     board.signal_layers = [
         ly for ly in board.layers if board.layer_type.get(ly) != "power"
     ]
+    # plane nets: assigned to power-type (plane) layers — they are copper
+    # pours, NOT routed as signal traces. Excluded from routing.
+    board.plane_nets = set()
+    for n in layer_nodes:
+        if board.layer_type.get(n[1]) == "power":
+            un = sexp.find(n, "use_net")
+            if un:
+                board.plane_nets.update(t for t in un[1:] if isinstance(t, str))
+    for pl in sexp.find_all(structure, "plane"):
+        if len(pl) > 1 and isinstance(pl[1], str):
+            board.plane_nets.add(pl[1])
     via_node = sexp.find(structure, "via")
     if via_node:
         board.via_padstacks = [t for t in via_node[1:] if not isinstance(t, list)]

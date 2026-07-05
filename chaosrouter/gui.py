@@ -584,8 +584,9 @@ class Main(QMainWindow):
             "PathFinder (experimental)",
             "Simple (fast first-pass)",
             "Balanced (spread layers, dense boards)",
+            "Manhattan (structured, dense boards)",
         ])
-        self._methods = ["chaos", "pathfinder", "simple", "balanced"]
+        self._methods = ["chaos", "pathfinder", "simple", "balanced", "manhattan"]
         saved = self.settings.value("method", "chaos")
         self.method_combo.setCurrentIndex(
             self._methods.index(saved) if saved in self._methods else 0
