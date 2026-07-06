@@ -289,23 +289,6 @@ class BoardView(QGraphicsView):
             it.setZValue(4)
             self.net_items.setdefault(net, []).append(it)
         self.viewport().update()
-        # DIAGNOSTIC: dump the exact finalized board so we can see what the
-        # GUI actually shows at the end of a route.
-        try:
-            import os as _os
-            import tempfile as _tf
-            from PySide6.QtCore import QRectF
-            from PySide6.QtGui import QImage, QPainter
-            rect = self.scene().itemsBoundingRect()
-            img = QImage(1600, 1200, QImage.Format_ARGB32)
-            img.fill(QColor("#0b0b0d"))
-            pnt = QPainter(img)
-            pnt.setRenderHint(QPainter.Antialiasing)
-            self.scene().render(pnt, QRectF(0, 0, 1600, 1200), rect)
-            pnt.end()
-            img.save(_os.path.join(_tf.gettempdir(), "chaosrouter_final_debug.png"))
-        except Exception:
-            pass
         return len(self._all_traces)
 
     def draw_unrouted(self, edges):
@@ -840,11 +823,7 @@ class Main(QMainWindow):
     def _proc_done(self, code, _status):
         self.go.setEnabled(True)
         self.cancel_btn.setVisible(False)
-        removed = self.view.finalize()  # remove all glow -> clean final board
-        self.log.appendPlainText(
-            f"· finalize: removed {removed} residual glow item(s), "
-            f"final_mode={self.view._final_mode}"
-        )
+        # Read the authoritative final stats FIRST, before touching the view.
         stats = None
         if os.path.isfile(self._stats_path):
             try:
@@ -852,6 +831,34 @@ class Main(QMainWindow):
                     stats = json.load(fh)
             except (OSError, json.JSONDecodeError):
                 stats = None
+        geo = (stats or {}).get("geometry") or {}
+        traces = geo.get("traces", [])
+        self.log.appendPlainText(
+            f"· done: stats={'yes' if stats else 'MISSING'}, "
+            f"final geometry = {len(traces)} traces, "
+            f"{len(geo.get('vias', []))} vias, {len(geo.get('unrouted', []))} unrouted"
+        )
+        # Rebuild the final board. NEVER leave it blank: only clear the live
+        # copper once we KNOW there's geometry to replace it with, and if the
+        # rebuild throws, fall back to a plain finalize (keep the live view).
+        try:
+            if traces:
+                self.view.clear_copper()
+                self.view._final_mode = True
+                for net, layer, coords, width in traces:
+                    self.view.add_trace(net, layer, [tuple(c) for c in coords], width)
+                for net, x, y, dia in geo.get("vias", []):
+                    self.view.add_via(net, x, y, dia)
+                self.view.finalize()
+                self.view.draw_unrouted(geo.get("unrouted", []))
+            else:
+                # no geometry (cancel/crash) — keep the live board, strip glow
+                self.view.finalize()
+        except Exception as e:  # a redraw error must never blank the board
+            self.log.appendPlainText(
+                f"· final redraw error (kept live view): {e}"
+            )
+            self.view.finalize()
         if stats is None:
             if self.status.text() != "cancelled":
                 self.status.setText(f"routing exited (code {code}) — see log")
@@ -860,31 +867,16 @@ class Main(QMainWindow):
         self.save_btn.setEnabled(True)
         r = stats["routing"]
         self.progress.setValue(100)
-        self.progress.setFormat(
-            f"done · {r['routed']}/{r['total']} connections"
-        )
-        self.status.setText(
+        self.progress.setFormat(f"done · {r['routed']}/{r['total']} connections")
+        msg = (
             f"done: {r['routed']}/{r['total']} in {r['seconds']:.0f}s — "
             f"session written to {os.path.basename(stats['ses'])}"
         )
-        # redraw the exact final copper from the authoritative stats geometry,
-        # in FINAL (clean) mode so no glow returns at the end — collect then
-        # draw once via finalize (a single clean redraw, zero glow)
-        self.view.clear_copper()
-        self.view._final_mode = True
-        geo = stats.get("geometry") or {}
-        for net, layer, coords, width in geo.get("traces", []):
-            self.view.add_trace(net, layer, [tuple(c) for c in coords], width)
-        for net, x, y, dia in geo.get("vias", []):
-            self.view.add_via(net, x, y, dia)
-        self.view.finalize()
-        # show unrouted connections as red ratsnest lines (placement feedback)
-        unrouted = geo.get("unrouted", [])
-        self.view.draw_unrouted(unrouted)
-        if unrouted:
-            self.status.setText(
-                self.status.text() + f"  ·  {len(unrouted)} unrouted (shown red)"
-            )
+        if traces:
+            n_un = len(geo.get("unrouted", []))
+            if n_un:
+                msg += f"  ·  {n_un} unrouted (shown red)"
+        self.status.setText(msg)
         self.populate_stats(stats)
 
     # ---- statistics tab ----------------------------------------------
