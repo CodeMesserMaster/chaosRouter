@@ -92,15 +92,6 @@ def run_pipeline(
         from .pathfinder import route_all_pathfinder
 
         result = route_all_pathfinder(router, progress=rp)
-    elif method == "simple":
-        # fast first-pass only: no rip-up / shake / endgame completion tail
-        result = router.route_all(progress=rp, rip_up=False)
-    elif method == "balanced":
-        # spread nets across signal layers by congestion (shortest paths, no
-        # directional lanes) — for dense multi-layer boards
-        from .balanced import route_all_balanced
-
-        result = route_all_balanced(router, progress=rp)
     elif method == "manhattan":
         # Manhattan-structured (validated on dense BMS: 84.5% -> 91%, 100%
         # direction discipline). Directional HIGHWAYS on the INNER layers —
