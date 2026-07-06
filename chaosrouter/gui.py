@@ -327,6 +327,13 @@ class BoardView(QGraphicsView):
         sc.clear()
         self.net_items.clear()
         self.layer_color.clear()
+        # a fresh board must never carry a previous board's stored copper
+        self._all_traces = []
+        self._all_vias = []
+        self._unrouted_items = []
+        self._final_mode = False
+        self._glow_all = []
+        self._fading = []
         for ly in board.layers:
             self.color_for(ly)
         # outline
@@ -566,8 +573,9 @@ class Main(QMainWindow):
             "Guided-Chaos (default)",
             "PathFinder (experimental)",
             "Manhattan (structured, dense boards)",
+            "Manhattan + Fanout (experimental)",
         ])
-        self._methods = ["chaos", "pathfinder", "manhattan"]
+        self._methods = ["chaos", "pathfinder", "manhattan", "manhattan-fanout"]
         saved = self.settings.value("method", "chaos")
         self.method_combo.setCurrentIndex(
             self._methods.index(saved) if saved in self._methods else 0
@@ -738,6 +746,14 @@ class Main(QMainWindow):
             os.path.dirname(dsn), self.out_edit.text().strip() or "routed"
         )
         self._stats_path = os.path.join(tempfile.gettempdir(), "chaosrouter_stats.json")
+        self._routing_dsn = dsn
+        # delete any stale stats from a previous route: if THIS route is
+        # cancelled it must not read the old board's stats and redraw it
+        # (the "previous board's routing overlaid on the new one" bug)
+        try:
+            os.remove(self._stats_path)
+        except OSError:
+            pass
         self.view.clear_copper()
         self._outbuf = ""
         self.log.clear()
@@ -830,6 +846,13 @@ class Main(QMainWindow):
                 with open(self._stats_path, encoding="utf-8") as fh:
                     stats = json.load(fh)
             except (OSError, json.JSONDecodeError):
+                stats = None
+        # reject a stats file that belongs to a DIFFERENT board (stale from a
+        # previous route) — never redraw the wrong board's copper
+        if stats is not None:
+            sdsn = stats.get("dsn")
+            want = getattr(self, "_routing_dsn", None)
+            if sdsn and want and os.path.abspath(sdsn) != os.path.abspath(want):
                 stats = None
         geo = (stats or {}).get("geometry") or {}
         traces = geo.get("traces", [])

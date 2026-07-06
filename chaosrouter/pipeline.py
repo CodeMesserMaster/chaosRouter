@@ -113,6 +113,41 @@ def run_pipeline(
             router._grain = {sig[0]: 0, sig[-1]: 1}
             router._grain_pen = 25.0
         result = router.route_all(progress=rp)
+    elif method == "manhattan-fanout":
+        # EXPERIMENTAL: Manhattan + PLANNED FANOUT. Order: diff pairs ->
+        # coordinated escape bundles for fine-pitch ICs (each pin escaped out
+        # of the pad field to an aligned breakout, in pin order so they can't
+        # cross) -> Manhattan routing, which now starts each escaped pin from
+        # its breakout OUTSIDE the field instead of fighting to get out.
+        from .diffpair import find_diff_pairs, route_diff_pair
+        from .fanout import planned_fanout
+
+        sig = list(getattr(board, "signal_layers", None) or board.layers)
+        if len(sig) >= 4:
+            inner = sig[1:-1]
+            router._grain = {ly: (i % 2) for i, ly in enumerate(inner)}
+            router._grain_pen = 25.0
+            router._layer_base = {sig[0]: 3.0, sig[-1]: 3.0}
+        else:
+            router._grain = {sig[0]: 0, sig[-1]: 1}
+            router._grain_pen = 25.0
+        for net_p, net_n, gap in find_diff_pairs(board):
+            if route_diff_pair(router, net_p, net_n, gap):
+                router.result.diffpair_nets |= {net_p.name, net_n.name}
+        ne = planned_fanout(router, progress=rp)
+        say(f"planned fanout: {ne} pins escaped from fine-pitch ICs")
+        nets = [
+            n for n in router.net_order()
+            if n.name not in router.result.diffpair_nets
+        ]
+        for net in nets:
+            router.route_net(net)
+        router._rip_and_retry(rp)
+        router._shake_parallel(rp)
+        router._endgame(rp)
+        if router.result.failed:
+            router._shake_parallel(rp)
+        result = router.result
     else:
         result = router.route_all(progress=rp, persist_seconds=persist_seconds)
     t_route = time.time() - t0

@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.25"
+__version__ = "0.2.26"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,21 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.26",
+        "2026-07-06",
+        [
+            "New experimental method 'Manhattan + Fanout': after diff pairs, "
+            "route each fine-pitch IC's pins as a coordinated escape bundle "
+            "(straight out of the pad field to aligned breakouts, in pin order) "
+            "before Manhattan routing. Helps dual-row parts (U1) but currently "
+            "net-negative on QFN-style parts — experimental, needs refinement.",
+            "Fix: a previous board's routing overlaid on a new board when the "
+            "new route was cancelled. The fixed stats file is now deleted at "
+            "route start, a DSN-mismatch guard rejects a stale stats file, and "
+            "loading a board clears all stored copper.",
+        ],
+    ),
     (
         "0.2.25",
         "2026-07-06",

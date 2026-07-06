@@ -25,7 +25,7 @@ def main():
     ap.add_argument("--fillet", type=float, default=25.0, help="max fillet radius, mil")
     ap.add_argument("--no-drc", action="store_true")
     ap.add_argument(
-        "--method", choices=("chaos", "pathfinder", "manhattan"), default="chaos",
+        "--method", choices=("chaos", "pathfinder", "manhattan", "manhattan-fanout"), default="chaos",
         help="routing method: guided-chaos (default) or FPGA-style "
              "pathfinder negotiated congestion",
     )
