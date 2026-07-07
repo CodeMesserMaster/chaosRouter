@@ -94,11 +94,17 @@ class Router:
 
     # ---------------- net ordering -------------------------------------
     def net_order(self) -> list[Net]:
-        """Shortest-MST nets first; giant nets naturally go last."""
+        """WIDE (current-carrying) nets FIRST, then shortest-MST nets. A fat
+        trace routed late is forced to squeeze through whatever space the
+        signals left — necking a power trace (a thermal hazard). Routing the
+        wide nets while the board is still open gives them clean full-width
+        paths; the thin signals then weave around them. Within each group,
+        shortest MST first (giant nets last)."""
         from scipy.sparse.csgraph import minimum_spanning_tree
         from scipy.spatial.distance import pdist, squareform
 
         planes = getattr(self.board, "plane_nets", frozenset())
+        wide_thresh = self.board.default_width * 2.0
         scored = []
         for net in self.board.nets.values():
             if net.name in planes:
@@ -108,9 +114,10 @@ class Router:
                 continue
             pts = np.array([(p.x, p.y) for p in pads])
             mst = minimum_spanning_tree(squareform(pdist(pts)))
-            scored.append((mst.sum(), net))
-        scored.sort(key=lambda t: t[0])
-        return [net for _, net in scored]
+            wide_rank = 0 if net.width > wide_thresh else 1
+            scored.append((wide_rank, mst.sum(), net))
+        scored.sort(key=lambda t: (t[0], t[1]))
+        return [net for _, _, net in scored]
 
     # ---------------- top level ----------------------------------------
     RIP_PASSES = 3
@@ -149,6 +156,10 @@ class Router:
             self._endgame(progress)
             if self.result.failed:
                 self._shake_parallel(progress)
+            if self.result.failed:
+                # map-guided final routing: steer the hard traces into the
+                # OPEN space the free-space map shows, instead of guessing
+                self._freespace_endgame(progress)
             # persistence: the board is routable — keep rolling fresh seeds
             # through shake+endgame until complete or the budget runs out
             import time as _t
@@ -476,6 +487,39 @@ class Router:
         finally:
             (self._grain, self._layer_base,
              self._orthogonal, self.via_cost) = saved
+
+    def _freespace_endgame(self, progress=None, bias: float = 6.0):
+        """Route the remaining hard traces BY THE FREE-SPACE MAP instead of
+        blind rip-up. For each still-failed net: rip only that net and re-route
+        it with the search biased toward open space (_freespace_bias) and cheap
+        vias, over the full board — so it dives to whatever layer the map shows
+        open and threads the genuine gaps, rather than squeezing through
+        congestion or necking. It never rips other nets, so it can only help."""
+        if not self.result.failed:
+            return
+        saved_bias = getattr(self, "_freespace_bias", None)
+        saved_via = self.via_cost
+        self._freespace_bias = bias
+        self.via_cost = min(self.via_cost, 60.0)  # cheap vias -> hop to open layers
+        try:
+            before = len(self.result.failed)
+            for name in list({n for n, a, b in self.result.failed}):
+                net = self.board.nets.get(name)
+                if net is None:
+                    continue
+                self._rip_net(name)
+                with self._result_lock:
+                    self.result.failed = [
+                        f for f in self.result.failed if f[0] != name
+                    ]
+                self.route_net(net)
+            if progress:
+                progress(0, 0,
+                         f"free-space endgame: {before} -> "
+                         f"{len(self.result.failed)} left", self.result)
+        finally:
+            self._freespace_bias = saved_bias
+            self.via_cost = saved_via
 
     def _endgame(self, progress=None):
         """Deterministic last resort for edges that survive rip-up and
@@ -1254,7 +1298,9 @@ class Router:
     # ---------------- single connection ---------------------------------
     OPT_MARGIN = 0.3  # optimistic A* margin (step units); exact check is truth
     LAYER_PENALTY = 8.0  # planar mode: per-cell cost of an off-assigned-layer
-    NECK_RADIUS = 35.0  # mil around own pads where neck-down applies
+    NECK_RADIUS = 20.0  # mil: neck-down allowed ONLY this close to an own pad
+    #                     (a taper INTO a fine pad) — never as a mid-route
+    #                     shortcut. Beyond it a trace must stay full width or via.
     NECK_AVOID = 30.0  # flat A* surcharge per necked cell: prefer full-width
     WIDTH_STEP = 3.93701  # 0.1 mm: width reductions happen in these steps
 
@@ -1623,6 +1669,17 @@ class Router:
                 c = lbase.get(layer)
                 if c:
                     cong[li] += c
+        fsb = getattr(self, "_freespace_bias", None)
+        if fsb:
+            # FREE-SPACE-GUIDED ENDGAME: penalise cells CLOSE to copper so the
+            # search steers down the MIDDLE of open channels, and (with cheap
+            # vias) dives to whatever layer the free-space map shows as open —
+            # instead of squeezing through congestion. `dist` IS that map:
+            # distance from each cell to the nearest foreign copper.
+            OPEN = 48.0  # mil; within this of copper -> graded surcharge
+            for li, layer in enumerate(ws.layers):
+                dd = dist[layer][y0 : y1 + 1, x0 : x1 + 1]
+                cong[li] += (fsb * np.maximum(0.0, OPEN - dd)).astype(np.float32)
 
         layer_stride = wy * wx
         start_states = np.array(

@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.27"
+__version__ = "0.2.28"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,21 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.28",
+        "2026-07-07",
+        [
+            "Neck-down rule: necking is now allowed ONLY within 20mil of an own "
+            "pad (a taper into a fine pad), never as a mid-route shortcut "
+            "through congestion. Shared constant -> applies to all four routers.",
+            "Wide/current nets route FIRST (net_order) so they get clean full-"
+            "width paths before signals fill the space.",
+            "Free-space-guided endgame: hard traces that survive the tail are "
+            "re-routed biased toward OPEN space (the distance-field map) with "
+            "cheap vias, so they dive to whatever layer has room instead of "
+            "being guessed at by rip-up. Only rips the failing net (can't hurt).",
+        ],
+    ),
     (
         "0.2.27",
         "2026-07-07",
