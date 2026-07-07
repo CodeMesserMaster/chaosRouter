@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.26"
+__version__ = "0.2.27"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,19 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.27",
+        "2026-07-07",
+        [
+            "Plane-aware routing for ALL methods: a declared plane net's pins "
+            "are now CONNECTED to the plane with a short stub + a via drop to "
+            "the plane layer (through-hole pins already touch it), instead of "
+            "being left unrouted. Runs before signal routing so plane vias are "
+            "reserved and signals weave around them — this is the fix for fat "
+            "power nets necking through congestion (they are planes now).",
+            "Parse plane_layer_of (which copper layer each plane occupies).",
+        ],
+    ),
     (
         "0.2.26",
         "2026-07-06",

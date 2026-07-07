@@ -1255,6 +1255,7 @@ class Router:
     OPT_MARGIN = 0.3  # optimistic A* margin (step units); exact check is truth
     LAYER_PENALTY = 8.0  # planar mode: per-cell cost of an off-assigned-layer
     NECK_RADIUS = 35.0  # mil around own pads where neck-down applies
+    NECK_AVOID = 30.0  # flat A* surcharge per necked cell: prefer full-width
     WIDTH_STEP = 3.93701  # 0.1 mm: width reductions happen in these steps
 
     def _best_width(self, net, layer, coords, floor_width: float) -> float:
@@ -1587,8 +1588,20 @@ class Router:
         if neck_zone is not None:
             for li, layer in enumerate(ws.layers):
                 d = dist[layer][y0 : y1 + 1, x0 : x1 + 1]
+                # (req-d)*0.6 centres the path (keeps the taper fat). The
+                # NECK_AVOID surcharge on necked cells makes the search STRONGLY
+                # prefer a full-width detour / a via up to a free layer, and
+                # neck only when there is genuinely no alternative. It SCALES
+                # WITH NET WIDTH: a fat current trace (e.g. 49mil) refuses to
+                # neck many times harder than a 6mil signal — necking a power
+                # trace is a thermal hazard, so it should via over almost
+                # anything rather than squeeze through a connector grid.
+                neck_pen = self.NECK_AVOID * max(
+                    1.0, net.width / max(self.board.default_width, 1e-6)
+                )
                 cong[li] = np.where(
-                    neck_zone & (d < req), (req - d) * 0.6, 0.0
+                    neck_zone & (d < req),
+                    (req - d) * 0.6 + neck_pen, 0.0
                 ).astype(np.float32)
         if self._corridor_bias is not None:
             # pathfinder mode: attract the search to the negotiated corridor

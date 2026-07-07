@@ -88,6 +88,16 @@ def run_pipeline(
                 f"failed={failed} vias={len(res.vias)}"
             )
 
+    # PLANE CONNECTION (all methods): connect each plane-net pin to its plane
+    # with a short stub + via drop, BEFORE signal routing, so the vias are
+    # reserved and signals weave around them. Plane nets stay out of net_order
+    # (not routed pin-to-pin) — this is how they actually get connected.
+    from .planes import connect_to_planes
+
+    npl = connect_to_planes(router, progress=rp)
+    if npl:
+        say(f"connected {npl} plane pins to their planes (stub + via)")
+
     if method == "pathfinder":
         from .pathfinder import route_all_pathfinder
 
