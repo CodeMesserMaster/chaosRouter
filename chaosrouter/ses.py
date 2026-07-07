@@ -183,7 +183,11 @@ def write_ses(path: str, dsn_path: str, board, result, via_map=None):
     # our own (circle ...) shape for it overrides its true size on import
     # (this is why "inPadVia" vias imported oversized in DipTrace). We
     # reference those by name and let the CAD use its own definition.
-    used_ps = sorted({via_map.get(v.padstack, v.padstack) for v in result.vias})
+    used_ps = sorted({
+        via_map.get(v.padstack, v.padstack)
+        for v in result.vias
+        if v.padstack is not None  # a None padstack must never crash the writer
+    })
     unknown = [n for n in used_ps if n not in board.padstacks]
     if unknown:
         a("    (library_out")

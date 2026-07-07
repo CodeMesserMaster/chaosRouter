@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.31"
+__version__ = "0.2.32"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,19 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.32",
+        "2026-07-07",
+        [
+            "Fix crash writing SES on any board with PLANES: plane vias were "
+            "created with padstack=None, so write_ses' sorted() of the padstack "
+            "set threw 'str < NoneType' — killing the pipeline before stats/SES "
+            "were written (GUI then showed nothing: no traces, no red ratsnest). "
+            "Plane vias now get a real padstack via via_for(); write_ses also "
+            "skips None defensively. Latent since v0.2.27, surfaced once the "
+            "tail-budget let routes actually finish and reach write_ses.",
+        ],
+    ),
     (
         "0.2.31",
         "2026-07-07",

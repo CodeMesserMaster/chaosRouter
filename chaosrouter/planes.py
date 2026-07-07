@@ -23,7 +23,6 @@ def connect_to_planes(router, progress=None) -> int:
     plane_of = getattr(b, "plane_layer_of", {})
     if not plane_of:
         return 0
-    vdia = router.via_diameter
     lock = getattr(router, "_result_lock", None)
     connected = 0
 
@@ -36,6 +35,9 @@ def connect_to_planes(router, progress=None) -> int:
             continue
         clr = net.net_class.clearance if net.net_class else b.default_clearance
         w = net.width
+        # a real via padstack (never None) so the SES writer can name it —
+        # a None padstack crashes write_ses when it sorts the padstack set
+        vname, vdia = router.via_for(net)
         lset = set(layers)
         for p in b.pads_of_net(net):
             plys = list(p.layers())
@@ -58,12 +60,12 @@ def connect_to_planes(router, progress=None) -> int:
                         with lock:
                             router.result.traces.append(Trace(net_name, play, stub, w))
                             router.result.vias.append(
-                                Via(net_name, bx, by, vdia, padstack=None)
+                                Via(net_name, bx, by, vdia, padstack=vname)
                             )
                     else:
                         router.result.traces.append(Trace(net_name, play, stub, w))
                         router.result.vias.append(
-                            Via(net_name, bx, by, vdia, padstack=None)
+                            Via(net_name, bx, by, vdia, padstack=vname)
                         )
                     ws.add_trace(net_name, play, stub, w)
                     ws.add_via(net_name, bx, by, vdia)
