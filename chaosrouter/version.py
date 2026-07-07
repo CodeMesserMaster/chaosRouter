@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.30"
+__version__ = "0.2.31"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,23 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.31",
+        "2026-07-07",
+        [
+            "TAIL SPEED: the cleanup tail (rip-up/shake/endgame) could grind for "
+            "many minutes to hours for near-zero yield. Now a single GLOBAL "
+            "wall-clock deadline (TAIL_BUDGET=150s) caps the whole tail; every "
+            "phase's inner loop checks it and stops. X500_r4: 705s tail -> "
+            "full route 211s, completion held at 92.5%.",
+            "Endgame no longer evicts big nets (GND/power) on any radius (the "
+            "rip+re-route bomb), caps victims per edge at 8 (was 25), and has a "
+            "30s sub-budget. Per-phase measurement: endgame was 126s for 0 edges.",
+            "Dropped freespace_endgame from the tail: measured to WORSEN results "
+            "(rips the whole failed net; a failed re-route loses good edges).",
+            "Persist loop: stagnation exit after 4 no-progress attempts.",
+        ],
+    ),
     (
         "0.2.30",
         "2026-07-07",

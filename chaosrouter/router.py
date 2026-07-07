@@ -151,25 +151,39 @@ class Router:
                 if progress:
                     progress(i + 1, len(nets), net.name, self.result)
         if rip_up:
-            self._rip_and_retry(progress)
-            self._shake_parallel(progress)   # parallel across cores
-            self._endgame(progress)
-            if self.result.failed:
-                self._shake_parallel(progress)
-            if self.result.failed:
-                # map-guided final routing: steer the hard traces into the
-                # OPEN space the free-space map shows, instead of guessing
-                self._freespace_endgame(progress)
-            # persistence: the board is routable — keep rolling fresh seeds
-            # through shake+endgame until complete or the budget runs out
+            # GLOBAL TAIL DEADLINE: the cleanup phases (rip-up, shake, endgame)
+            # are low-yield and can grind for many minutes; a per-phase budget
+            # isn't enough because a single slow phase overruns. Instead cap the
+            # WHOLE tail with one wall-clock deadline that every phase's inner
+            # loop checks, and run phases in ROI order (rip-up first — it fixes
+            # the most per second). When the deadline passes, stop and return
+            # whatever routed. freespace_endgame is DROPPED: it rips the whole
+            # failed net and measurably WORSENED results (partially-routed nets
+            # lose their good edges on a failed re-route).
             import time as _t
 
+            self._deadline = _t.time() + self.TAIL_BUDGET
+            try:
+                self._rip_and_retry(progress)
+                if self.result.failed and _t.time() < self._deadline:
+                    self._shake_parallel(progress)   # parallel across cores
+                if self.result.failed and _t.time() < self._deadline:
+                    self._endgame(progress)
+                if self.result.failed and _t.time() < self._deadline:
+                    self._shake_parallel(progress)
+            finally:
+                self._deadline = None
+            # persistence: the board is routable — keep rolling fresh seeds
+            # through shake+endgame until complete or the budget runs out
             t0 = _t.time()
             attempt = 1
+            best = len(self.result.failed)
+            stagnant = 0
             while (
                 self.result.failed
                 and persist_seconds > 0
                 and _t.time() - t0 < persist_seconds
+                and stagnant < self.PERSIST_PATIENCE
             ):
                 attempt += 1
                 if progress:
@@ -182,6 +196,14 @@ class Router:
                     )
                 self._shake(progress, seed=20260703 + attempt * 7919)
                 self._endgame(progress)
+                # give up early when fresh seeds stop helping — the remaining
+                # edges are genuinely stuck, not waiting on a lucky shuffle
+                now = len(self.result.failed)
+                if now < best:
+                    best = now
+                    stagnant = 0
+                else:
+                    stagnant += 1
         return self.result
 
     def set_corridor_bias(self, bias):
@@ -190,6 +212,7 @@ class Router:
     # ---------------- stochastic shaker ---------------------------------
     SHAKE_ROUNDS = 60
     SHAKE_PATIENCE = 15  # stop after this many consecutive rejections
+    PERSIST_PATIENCE = 4  # persist: give up after this many no-progress attempts
 
     def _shake(self, progress=None, seed: int = 20260703):
         """Monte-Carlo local perturbation: when deterministic rip-up stalls,
@@ -389,10 +412,14 @@ class Router:
         never touch the same copper; quality identical to sequential (each
         attempt keeps only on strict local improvement)."""
         import concurrent.futures as cf
+        import time as _t
 
         workers = getattr(self, "_workers", 8)
+        gd = getattr(self, "_deadline", None)
         rejects = 0
         for r in range(rounds):
+            if gd is not None and _t.time() > gd:
+                break  # global tail deadline — stop the low-yield grind
             fails = [f for f in self.result.failed
                      if f[0] not in self.result.diffpair_nets]
             if not fails:
@@ -415,6 +442,13 @@ class Router:
 
     # ---------------- endgame --------------------------------------------
     ENDGAME_WINDOWS = (200.0, 350.0)  # eviction radius escalation, mil
+    ENDGAME_BUDGET = 30.0  # wall-clock cap (s) per _endgame call: an edge that
+    #                        can't seal must not cost hours of eviction churn
+    ENDGAME_MAX_VICTIMS = 8  # evict at most this many per edge (was 25): the
+    #                          long tail of victims almost never seals the edge
+    TAIL_BUDGET = 150.0  # global wall-clock cap (s) for the whole cleanup tail
+    #                      (rip-up + shake + endgame). Keeps the route/inspect/
+    #                      move loop fast; the tail is low-yield past this.
 
     def _finish_edge(self, net: Net, pad, near_pad) -> bool:
         """Surgically route ONE missing pad into the net's existing tree
@@ -529,10 +563,25 @@ class Router:
         accept with exact rollback. Escalates the eviction radius; on the
         final radius even big nets (GND, power) may be evicted."""
         from shapely.geometry import box as shp_box
+        import time as _t
 
+        t0 = _t.time()
+        # stop at the sooner of this call's own budget or the global tail
+        # deadline set by route_all
+        end = t0 + self.ENDGAME_BUDGET
+        gd = getattr(self, "_deadline", None)
+        if gd is not None:
+            end = min(end, gd)
         for round_i, m in enumerate(self.ENDGAME_WINDOWS):
             last = round_i == len(self.ENDGAME_WINDOWS) - 1
             for edge in list(self.result.failed):
+                if _t.time() > end:
+                    if progress:
+                        progress(0, 0,
+                                 f"  endgame: budget spent, "
+                                 f"{len(self.result.failed)} left",
+                                 self.result)
+                    return  # wall-clock guard — never grind for hours
                 if edge not in self.result.failed:
                     continue  # already fixed as a bystander of an eviction
                 net_name, pid_a, pid_b = edge
@@ -564,10 +613,12 @@ class Router:
                             continue
                         if onet == net_name or onet in self.result.diffpair_nets:
                             continue
-                        if (
-                            not last
-                            and self._net_edge_count(onet) > self.MAX_VICTIM_EDGES
-                        ):
+                        # NEVER evict a big net (GND / power / many-pin) — even
+                        # on the final radius. Ripping and fully re-routing a
+                        # 200+ pin net to seal one signal edge is the eviction
+                        # bomb that made the endgame run for hours, and it is
+                        # almost always rejected and rolled back anyway.
+                        if self._net_edge_count(onet) > self.MAX_VICTIM_EDGES:
                             continue
                         d = geom.distance(seg)
                         if d < seal_d.get(onet, 1e9):
@@ -575,7 +626,7 @@ class Router:
                 victims = set(seal_d)
                 ordered = sorted(
                     victims, key=lambda n: (seal_d[n], self._net_edge_count(n))
-                )[:25]
+                )[: self.ENDGAME_MAX_VICTIMS]
                 group = [net_name] + ordered
 
                 snap_traces = [t for t in self.result.traces if t.net in group]
@@ -777,9 +828,14 @@ class Router:
                 )
 
     def _rip_and_retry(self, progress=None):
+        import time as _t
+
+        gd = getattr(self, "_deadline", None)
         rip_counts: dict[str, int] = {}
         unfixable: set[str] = set()
         for pass_i in range(self.RIP_PASSES):
+            if gd is not None and _t.time() > gd:
+                break  # global tail deadline
             self._retry_failed_pairs(pass_i, rip_counts, progress)
             failing = []
             for net_name, *_ in self.result.failed:
@@ -793,6 +849,8 @@ class Router:
                 progress(0, 0, f"rip-up pass {pass_i + 1}: {len(failing)} nets", self.result)
 
             for net_name in failing:
+                if gd is not None and _t.time() > gd:
+                    break  # global tail deadline
                 net = self.board.nets[net_name]
                 edges = [f for f in self.result.failed if f[0] == net_name]
                 victims: set[str] = set()
