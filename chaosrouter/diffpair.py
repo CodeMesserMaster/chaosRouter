@@ -178,10 +178,11 @@ def _route_pair_attempt(router, net_p, net_n, gap, chain, layer_order) -> bool:
         if seg is None:
             return False
         layer, coords_p, coords_n, _, _ = seg
+        seg_traces = {}
         for net, coords in ((net_p, coords_p), (net_n, coords_n)):
-            router.result.traces.append(
-                Trace(net.name, layer, coords, width, no_fillet=True)
-            )
+            tr = Trace(net.name, layer, coords, width, no_fillet=True)
+            router.result.traces.append(tr)
+            seg_traces[net.name] = tr
             ws.add_trace(net.name, layer, coords, width)
             router.result.routed_edges += 1
             router.result.edges_by_net[net.name] = (
@@ -190,9 +191,10 @@ def _route_pair_attempt(router, net_p, net_n, gap, chain, layer_order) -> bool:
         for net, coords in ((net_p, coords_p), (net_n, coords_n)):
             pad_a = st_a[0] if net is net_p else st_a[1]
             pad_b = st_b[0] if net is net_p else st_b[1]
-            for pad, tip in ((pad_a, coords[0]), (pad_b, coords[-1])):
-                if not _route_breakout(router, net, pad, tip, coords, layer):
-                    return False
+            if _route_breakout(router, net, pad_a, coords[0], coords, layer) < 0:
+                return False
+            if _route_breakout(router, net, pad_b, coords[-1], coords, layer) < 0:
+                return False
     return True
 
 
@@ -238,52 +240,56 @@ def _route_individual(router, net, pad_a, pad_b) -> bool:
     return True
 
 
-def _route_breakout(router, net, pad, tip, seg_coords, layer) -> bool:
-    """Route pad -> this coupled segment (target = the segment's own cells)."""
-    from shapely.geometry import Point
-
-    ws = router.ws
-    li = ws.layers.index(layer)
-    target = {ly: np.zeros((ws.ny, ws.nx), dtype=bool) for ly in ws.layers}
-    # target ONLY the segment end near this pad: joining mid-segment would
-    # leave the coupled trace's tip dangling as an open stub
+def _route_breakout(router, net, pad, tip, seg_coords, layer) -> float:
+    """Route pad -> this coupled segment. Returns the distance (mil) INTO the
+    segment from the near end where the breakout joined (0.0 = at the tip), or
+    -1.0 on failure. Joining at the very tip fails when the tip is jammed <~50mil
+    from the pad (no room to drop the layer-transition via); a bit further in
+    there IS room, so we walk the join point inward. The caller trims the short
+    skipped stub so the coupled tip never dangles."""
     from shapely.geometry import Point as _P
     from shapely.ops import substring as _substring
 
+    ws = router.ws
+    li = ws.layers.index(layer)
     seg_line = LineString(seg_coords)
     d = seg_line.project(_P(tip))
-    zone = _substring(seg_line, max(0.0, d - 25.0), min(seg_line.length, d + 25.0))
-    zone_coords = list(zone.coords) if zone.geom_type == "LineString" else [tip, tip]
-    iys, ixs = ws.line_cells(zone_coords)
-    target[layer][iys, ixs] = True
-    centers = [(li, int(iy), int(ix)) for iy, ix in zip(iys, ixs)]
-
+    at_start = d < seg_line.length * 0.5  # near end is coords[0] (else coords[-1])
     dist = ws.foreign_distance(net.name)
     own = ws.own_exempt_mask(net.name, net.width)
-    out = router._route_to_tree(
-        net, pad, tip, target, centers, dist, own,
-        windows=(150.0, 400.0, 1000.0), snap_line=seg_line,
-    )
-    if out is None:
-        # ROBUST fallback: a pad in a crowded field (e.g. a Top connector pad)
-        # may need to escape on its own layer and via DOWN to the segment AWAY
-        # from the congestion, not with a via jammed at the pad. Retry with no
-        # snap constraint, a full-board window and cheap vias so the via lands
-        # wherever there IS room. Beats rolling back the whole coupled pair for
-        # one stubborn breakout.
+
+    # walk the join window inward from the near end until it routes
+    for off in (0.0, 24.0, 40.0, 56.0, 80.0, 110.0):
+        if at_start:
+            s0, s1 = off, min(seg_line.length, off + 48.0)
+        else:
+            s0, s1 = max(0.0, seg_line.length - off - 48.0), seg_line.length - off
+        if s1 - s0 < 8.0:
+            break
+        zone = _substring(seg_line, s0, s1)
+        zc = list(zone.coords) if zone.geom_type == "LineString" else None
+        if not zc or len(zc) < 2:
+            continue
+        target = {ly: np.zeros((ws.ny, ws.nx), dtype=bool) for ly in ws.layers}
+        iys, ixs = ws.line_cells(zc)
+        target[layer][iys, ixs] = True
+        centers = [(li, int(iy), int(ix)) for iy, ix in zip(iys, ixs)]
+        join_pt = zc[0] if at_start else zc[-1]
+        snap = seg_line if off == 0.0 else None
         saved_via = router.via_cost
-        router.via_cost = min(router.via_cost, 60.0)
+        if off > 0.0:
+            router.via_cost = min(router.via_cost, 60.0)  # cheap vias further in
         try:
             out = router._route_to_tree(
-                net, pad, tip, target, centers, dist, own,
-                windows=(150.0, 400.0, 1000.0, 1e9), snap_line=None,
+                net, pad, join_pt, target, centers, dist, own,
+                windows=(150.0, 400.0, 1000.0, 1e9), snap_line=snap,
             )
         finally:
             router.via_cost = saved_via
-        if out is None:
-            return False
-    _register(router, net, out)
-    return True
+        if out is not None:
+            _register(router, net, out)
+            return off
+    return -1.0
 
 
 def _route_pair_segment(

@@ -1136,7 +1136,13 @@ class Router:
             attempts.append(("neck", via_name, via_dia))
             if min_dia < via_dia - 1e-6:
                 attempts.append(("neck", min_name, min_dia))
-        if neck_w < net.width - 1e-6:
+        # WIDE current-carrying traces must NEVER route the whole hop at neck
+        # width — a fat power trace squeezing to 10% through a through-hole/via
+        # grid is a thermal hazard, and it is FORBIDDEN. They route full width
+        # (pad-entry taper only) or FAIL, leaving a red ratsnest for the user
+        # to fix by hand or by moving parts. Thin signals keep the fallback.
+        wide = net.width > 2.0 * self.board.default_width
+        if neck_w < net.width - 1e-6 and not wide:
             attempts.append(("narrow", min_name, min_dia))
         if len(attempts) == 1 and min_dia < via_dia - 1e-6:
             attempts.append(("full", min_name, min_dia))

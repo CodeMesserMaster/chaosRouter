@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.29"
+__version__ = "0.2.30"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,21 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.30",
+        "2026-07-07",
+        [
+            "WIDE-NET NECKING FORBIDDEN: a wide current trace can no longer "
+            "route the whole hop at neck width (the 'narrow' fallback that let "
+            "it squeeze to ~10% through a via/through-hole grid). Wide nets "
+            "route full width or FAIL (red ratsnest) — never necked mid-route.",
+            "Diff-pair breakout fixed: the coupled tip is often jammed <50mil "
+            "from the pad with no room to drop the layer-transition via, which "
+            "failed the whole pair. The breakout now walks its join point INWARD "
+            "along the segment until there is via room. X500_r4: 3/3 pairs route "
+            "(was 2/3 — Net_150 was empty).",
+        ],
+    ),
     (
         "0.2.29",
         "2026-07-07",
