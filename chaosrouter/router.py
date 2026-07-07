@@ -1427,22 +1427,44 @@ class Router:
             net.width, max(self.neck_width(net), self.pad_entry_width(pad))
         )
 
-    def _neck_zone(self, net: Net, window):
-        """Window cells within NECK_RADIUS of an own pad whose copper is
-        narrower than the trace — where the trace may neck down (the DSN's
-        pin_width_taper rule)."""
+    def _neck_zone(self, net: Net, window, pad=None, near_pt=None):
+        """Window cells within NECK_RADIUS of the SPECIFIC pad being connected
+        (and the target attachment point) whose copper is narrower than the
+        trace. A neck is a taper INTO the pad this connection terminates on —
+        NOT near every pad on the net (which, for a net with pads throughout a
+        connector grid, would let it neck the whole way through). If no pad is
+        given, falls back to all own narrow pads (legacy callers)."""
         ws = self.ws
         x0, y0, x1, y1 = window
         zone = np.zeros((y1 - y0 + 1, x1 - x0 + 1), dtype=bool)
         r = int(np.ceil(self.NECK_RADIUS / ws.step))
-        for p in self.board.pads_of_net(net):
-            g = p.geometry_on(next(iter(p.layers())))
-            if g is None:
-                continue
-            b = g.bounds
-            if min(b[2] - b[0], b[3] - b[1]) >= net.width:
-                continue  # pad is wide enough, no neck needed there
-            cx, cy = ws.to_cell(p.x, p.y)
+
+        # only the connecting pad's copper narrowness gates a neck; the target
+        # attachment point (near_pt) is where the trace joins the net's tree,
+        # so a taper there is also legitimate.
+        spots = []
+        if pad is not None:
+            # ONLY the connecting pad — and only if its copper is narrower than
+            # the trace (a genuine taper into a fine pad). NOT near_pt: that is
+            # where the trace joins the net's tree, usually MID-ROUTE, and
+            # allowing a neck there let traces neck through anything.
+            g = pad.geometry_on(next(iter(pad.layers())))
+            if g is not None:
+                b = g.bounds
+                if min(b[2] - b[0], b[3] - b[1]) < net.width:
+                    spots.append((pad.x, pad.y))
+        else:
+            # legacy: all own narrow pads
+            for p in self.board.pads_of_net(net):
+                g = p.geometry_on(next(iter(p.layers())))
+                if g is None:
+                    continue
+                bb = g.bounds
+                if min(bb[2] - bb[0], bb[3] - bb[1]) < net.width:
+                    spots.append((p.x, p.y))
+
+        for (px, py) in spots:
+            cx, cy = ws.to_cell(px, py)
             if not (x0 - r <= cx <= x1 + r and y0 - r <= cy <= y1 + r):
                 continue
             ix0, ix1 = max(x0, cx - r), min(x1, cx + r)
@@ -1498,7 +1520,9 @@ class Router:
             y0 = max(0, min(ay, by) - m)
             y1 = min(ws.ny - 1, max(ay, by) + m)
             window = (x0, y0, x1, y1)
-            neck_zone = self._neck_zone(net, window) if neck else None
+            neck_zone = (
+                self._neck_zone(net, window, pad, near_pt) if neck else None
+            )
             neck_own = ws.own_exempt_mask(net.name, nwidth, bounds) if neck else None
             # optimistic pass first (exact validation is the judge),
             # pessimistic pass as fallback (forces a detour)

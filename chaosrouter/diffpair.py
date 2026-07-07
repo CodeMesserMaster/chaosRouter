@@ -265,7 +265,23 @@ def _route_breakout(router, net, pad, tip, seg_coords, layer) -> bool:
         windows=(150.0, 400.0, 1000.0), snap_line=seg_line,
     )
     if out is None:
-        return False
+        # ROBUST fallback: a pad in a crowded field (e.g. a Top connector pad)
+        # may need to escape on its own layer and via DOWN to the segment AWAY
+        # from the congestion, not with a via jammed at the pad. Retry with no
+        # snap constraint, a full-board window and cheap vias so the via lands
+        # wherever there IS room. Beats rolling back the whole coupled pair for
+        # one stubborn breakout.
+        saved_via = router.via_cost
+        router.via_cost = min(router.via_cost, 60.0)
+        try:
+            out = router._route_to_tree(
+                net, pad, tip, target, centers, dist, own,
+                windows=(150.0, 400.0, 1000.0, 1e9), snap_line=None,
+            )
+        finally:
+            router.via_cost = saved_via
+        if out is None:
+            return False
     _register(router, net, out)
     return True
 

@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.28"
+__version__ = "0.2.29"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,18 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.29",
+        "2026-07-07",
+        [
+            "Necking fix: neck-down is now gated on the CONNECTING PAD only "
+            "(dropped near_pt, which was usually mid-route and re-opened necking "
+            "through anything). 4g wide-necking collapsed 800->300mil, longest "
+            "single neck 31mil (genuine pad-entry only).",
+            "Diff-pair breakout: robust fallback (no snap, full window, cheap "
+            "vias) when the primary breakout fails.",
+        ],
+    ),
     (
         "0.2.28",
         "2026-07-07",
