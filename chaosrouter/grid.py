@@ -259,7 +259,10 @@ class Workspace:
     on_add = None
     on_rip = None
 
-    def add_trace(self, net: str, layer: str, coords, width: float):
+    def add_trace(self, net: str, layer: str, coords, width: float, kind: str = "trace"):
+        # kind="escape" tags a dense-part fanout stub: it is FIXED copper that
+        # remove_net_wiring must NOT rip (only "trace"/"via" are rippable), so
+        # a fanned-out pin's breakout stays connected through rip-up.
         if self.on_add:
             self.on_add("trace", net, layer, coords, width)
         line = LineString(coords)
@@ -273,7 +276,7 @@ class Workspace:
             sel = (grid[iys, ixs] == FREE) | (grid[iys, ixs] == nid)
             grid[iys[sel], ixs[sel]] = nid
             self.wiring_owner[layer][iys, ixs] = nid
-            self.copper[layer].append((net, geom, clr, "trace", line, width / 2))
+            self.copper[layer].append((net, geom, clr, kind, line, width / 2))
             self.fast.add_segments(layer, coords, width / 2, clr, net)
             self._trees_dirty = True
             self._patch_exempt(net, geom, [layer])

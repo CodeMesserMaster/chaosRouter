@@ -98,6 +98,22 @@ def run_pipeline(
     if npl:
         say(f"connected {npl} plane pins to their planes (stub + via)")
 
+    # ESCAPE DENSE PARTS FIRST (all methods). Fine-pitch pins fail not for lack
+    # of board space but because they can't get OUT of the pad field once
+    # neighbours grab the escape lanes. Escape every dense part as an ordered
+    # bundle to breakouts outside the field BEFORE any signal routing; each
+    # net then routes from its breakout. Skip diff-pair nets (routed coupled).
+    # Escape stubs are fixed copper (is_escape) that rip-up never touches.
+    from .diffpair import find_diff_pairs
+    from .fanout import planned_fanout
+
+    _dp_nets = set()
+    for _np, _nn, _g in find_diff_pairs(board):
+        _dp_nets |= {_np.name, _nn.name}
+    nesc = planned_fanout(router, skip_nets=_dp_nets, progress=rp)
+    if nesc:
+        say(f"escaped {nesc} pins from dense parts first (fanout)")
+
     if method == "pathfinder":
         from .pathfinder import route_all_pathfinder
 
@@ -144,8 +160,7 @@ def run_pipeline(
         for net_p, net_n, gap in find_diff_pairs(board):
             if route_diff_pair(router, net_p, net_n, gap):
                 router.result.diffpair_nets |= {net_p.name, net_n.name}
-        ne = planned_fanout(router, progress=rp)
-        say(f"planned fanout: {ne} pins escaped from fine-pitch ICs")
+        # fanout already ran as a shared pipeline phase (all methods)
         nets = [
             n for n in router.net_order()
             if n.name not in router.result.diffpair_nets

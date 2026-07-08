@@ -43,10 +43,13 @@ def dense_ics(board, min_pins: int = 12, max_pitch: float = 40.0):
     return out
 
 
-def planned_fanout(router, escape_gap: float = 45.0, progress=None) -> int:
+def planned_fanout(router, escape_gap: float = 45.0, progress=None,
+                   skip_nets=frozenset()) -> int:
     """Route a coordinated escape bundle for every fine-pitch IC. Returns the
     number of pins escaped. Sets router._escape[pin_id] = (bx, by, layer) so
-    the main routing phase starts each escaped pin from its breakout."""
+    the main routing phase starts each escaped pin from its breakout. skip_nets
+    (plane + diff-pair nets) are left alone — planes drop straight to a via and
+    diff pairs route coupled, neither wants a single-ended fanout stub."""
     from .router import Trace
 
     b = router.board
@@ -54,6 +57,7 @@ def planned_fanout(router, escape_gap: float = 45.0, progress=None) -> int:
     if getattr(router, "_escape", None) is None:
         router._escape = {}
     planes = getattr(b, "plane_nets", frozenset())
+    skip = set(planes) | set(skip_nets)
 
     n_esc = 0
     for ref, pads in dense_ics(b):
@@ -61,7 +65,7 @@ def planned_fanout(router, escape_gap: float = 45.0, progress=None) -> int:
         ys = [p.y for p in pads]
         cx, cy = sum(xs) / len(pads), sum(ys) / len(pads)
         hw, hh = (max(xs) - min(xs)) / 2, (max(ys) - min(ys)) / 2
-        routable = [p for p in pads if p.net and p.net not in planes]
+        routable = [p for p in pads if p.net and p.net not in skip]
 
         # order: by escape side, then position ALONG the row — so adjacent
         # pins escape into adjacent lanes in sequence (the bundle can't cross)
@@ -79,22 +83,41 @@ def planned_fanout(router, escape_gap: float = 45.0, progress=None) -> int:
             layer = next(iter(p.layers()))
             ox, oy = p.x - cx, p.y - cy
             horiz = abs(ox) >= abs(oy)
-            if horiz:
-                d = 1 if ox >= 0 else -1
-                bx, by = cx + d * (hw + escape_gap), p.y
-            else:
-                d = 1 if oy >= 0 else -1
-                bx, by = p.x, cy + d * (hh + escape_gap)
-            coords = [(p.x, p.y), (bx, by)]
             # neck the escape: thin + reduced clearance so it fits the pitch
             w = router.neck_width(net)
             clr = router.neck_gap(net)
-            if ws.exact_trace_ok(p.net, layer, coords, w, clr):
-                with router._result_lock:
-                    router.result.traces.append(Trace(p.net, layer, coords, w))
-                ws.add_trace(p.net, layer, coords, w)
-                router._escape[p.pin_id] = (bx, by, layer)
-                n_esc += 1
+            # try the straight escape first, then progressively further out and
+            # a small lateral fan — a pin whose direct lane is taken can still
+            # reach a breakout a bit deeper or offset, which is what makes the
+            # bundle CLEAR EVERY pin instead of most of them
+            placed = False
+            for extra in (0.0, 25.0, 55.0, 90.0):
+                gap = escape_gap + extra
+                if horiz:
+                    d = 1 if ox >= 0 else -1
+                    cands = [(cx + d * (hw + gap), p.y),
+                             (cx + d * (hw + gap), p.y + 18),
+                             (cx + d * (hw + gap), p.y - 18)]
+                else:
+                    d = 1 if oy >= 0 else -1
+                    cands = [(p.x, cy + d * (hh + gap)),
+                             (p.x + 18, cy + d * (hh + gap)),
+                             (p.x - 18, cy + d * (hh + gap))]
+                for bx, by in cands:
+                    coords = [(p.x, p.y), (bx, by)]
+                    if not ws.exact_trace_ok(p.net, layer, coords, w, clr):
+                        continue
+                    with router._result_lock:
+                        router.result.traces.append(
+                            Trace(p.net, layer, coords, w, is_escape=True)
+                        )
+                    ws.add_trace(p.net, layer, coords, w, kind="escape")
+                    router._escape[p.pin_id] = (bx, by, layer)
+                    n_esc += 1
+                    placed = True
+                    break
+                if placed:
+                    break
         if progress:
             progress(0, 0, f"fanout {ref}: escaped", router.result)
     return n_esc

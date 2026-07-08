@@ -29,6 +29,7 @@ class Trace:
     coords: list  # [(x, y), ...]
     width: float
     no_fillet: bool = False  # already curved by construction (coupled pairs)
+    is_escape: bool = False  # dense-part fanout stub: fixed, rip-up never rips it
 
 
 @dataclass
@@ -132,8 +133,12 @@ class Router:
 
         from .diffpair import find_diff_pairs, route_diff_pair
 
-        # differential pairs first: most constrained, must stay coupled
+        # differential pairs first: most constrained, must stay coupled.
+        # Skip any already routed by a caller (e.g. the pipeline routes them
+        # BEFORE fanout so escape stubs never block the coupled envelope).
         for net_p, net_n, gap in find_diff_pairs(self.board):
+            if net_p.name in self.result.diffpair_nets:
+                continue
             if route_diff_pair(self, net_p, net_n, gap):
                 self.result.diffpair_nets |= {net_p.name, net_n.name}
             # on failure the nets fall through to normal individual routing
@@ -926,7 +931,13 @@ class Router:
 
     def _rip_net(self, net_name: str):
         with self._result_lock:
-            self.result.traces = [t for t in self.result.traces if t.net != net_name]
+            # keep fanout escape stubs — they are fixed infrastructure so the
+            # pin's breakout stays connected (else the re-route starts from an
+            # orphaned breakout and the tail hangs)
+            self.result.traces = [
+                t for t in self.result.traces
+                if t.net != net_name or getattr(t, "is_escape", False)
+            ]
             self.result.vias = [v for v in self.result.vias if v.net != net_name]
             self.result.failed = [f for f in self.result.failed if f[0] != net_name]
             self.result.routed_edges -= self.result.edges_by_net.pop(net_name, 0)

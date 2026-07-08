@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.32"
+__version__ = "0.2.33"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,27 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.33",
+        "2026-07-08",
+        [
+            "FANOUT-FIRST for ALL methods: dense fine-pitch parts (>=12 pins, "
+            "pitch<40mil) get their pins escaped as coordinated bundles to "
+            "breakouts OUTSIDE the pad field BEFORE any signal routing, then "
+            "each net routes from its breakout. On a sparse board the failures "
+            "are dense-part ESCAPES, not lack of space (X500_r4: 53/82 first-"
+            "pass failures touched a dense part). Wired as a shared pipeline "
+            "phase after connect_to_planes. X500_r4 full route: 29->24 failed "
+            "(92.5%->96.5%), 317s.",
+            "Escape stubs are rip-safe: Trace.is_escape + add_trace kind=escape; "
+            "remove_net_wiring/_rip_net never rip them, so a fanned-out pin's "
+            "breakout stays connected (fixes the old fanout+rip-up hang).",
+            "More-complete escape: tries deeper and laterally-offset breakouts "
+            "when the straight lane is taken, so the bundle clears more pins.",
+            "route_all skips diff pairs already routed by a caller (pipeline can "
+            "route them before fanout so escape stubs never block the envelope).",
+        ],
+    ),
     (
         "0.2.32",
         "2026-07-07",
