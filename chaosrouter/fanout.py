@@ -93,16 +93,22 @@ def planned_fanout(router, escape_gap: float = 45.0, progress=None,
             placed = False
             for extra in (0.0, 25.0, 55.0, 90.0):
                 gap = escape_gap + extra
+                # SPREAD IN WIDTH (gentle): fan the breakout slightly away from
+                # the part centre in the cross direction so escaped traces end
+                # up a bit further apart than the pin pitch, leaving room to
+                # route onward. Kept mild — a big spread pushes breakouts into
+                # collisions and FEWER pins escape.
+                spread = 1.25
                 if horiz:
                     d = 1 if ox >= 0 else -1
-                    cands = [(cx + d * (hw + gap), p.y),
-                             (cx + d * (hw + gap), p.y + 18),
-                             (cx + d * (hw + gap), p.y - 18)]
+                    bx = cx + d * (hw + gap)
+                    by = cy + (p.y - cy) * spread
+                    cands = [(bx, by), (bx, p.y), (bx, by + 20), (bx, by - 20)]
                 else:
                     d = 1 if oy >= 0 else -1
-                    cands = [(p.x, cy + d * (hh + gap)),
-                             (p.x + 18, cy + d * (hh + gap)),
-                             (p.x - 18, cy + d * (hh + gap))]
+                    by = cy + d * (hh + gap)
+                    bx = cx + (p.x - cx) * spread
+                    cands = [(bx, by), (p.x, by), (bx + 20, by), (bx - 20, by)]
                 for bx, by in cands:
                     coords = [(p.x, p.y), (bx, by)]
                     if not ws.exact_trace_ok(p.net, layer, coords, w, clr):

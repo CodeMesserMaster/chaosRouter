@@ -176,6 +176,14 @@ class Router:
                     self._endgame(progress)
                 if self.result.failed and _t.time() < self._deadline:
                     self._shake_parallel(progress)
+                # ANY-PATH last resort: whatever still fails gets to take ANY
+                # route through the WHOLE board, any layers, as many vias as
+                # needed (drops grain/layer constraints, near-free vias). The
+                # router must never abandon a routable net just because the
+                # direct path is blocked — a winding many-via path is fine.
+                if self.result.failed:
+                    self._deadline = _t.time() + self.ANYPATH_BUDGET
+                    self._anypath(progress)
             finally:
                 self._deadline = None
             # persistence: the board is routable — keep rolling fresh seeds
@@ -454,6 +462,8 @@ class Router:
     TAIL_BUDGET = 150.0  # global wall-clock cap (s) for the whole cleanup tail
     #                      (rip-up + shake + endgame). Keeps the route/inspect/
     #                      move loop fast; the tail is low-yield past this.
+    ANYPATH_BUDGET = 120.0  # extra budget (s) for the any-route/any-via last
+    #                         resort — it must never abandon a routable net.
 
     def _finish_edge(self, net: Net, pad, near_pad) -> bool:
         """Surgically route ONE missing pad into the net's existing tree
@@ -897,6 +907,21 @@ class Router:
                 # rip the failing net itself plus the blockers, reroute all
                 before = {tuple(f[1:]) for f in edges}
                 ripped = [net_name] + sorted(victims)
+                group = ripped + [
+                    n for pv in pair_victims for n in (pv[0].name, pv[1].name)
+                ]
+                # snapshot for STRICT-NON-WORSENING accept: a rip that displaces
+                # more nets than it fixes (e.g. 21 failed -> 24) must be rolled
+                # back, else the tail climbs back up and keeps the worse state.
+                snap_traces = [
+                    t for t in self.result.traces
+                    if t.net in group and not getattr(t, "is_escape", False)
+                ]
+                snap_vias = [v for v in self.result.vias if v.net in group]
+                snap_failed = list(self.result.failed)
+                snap_edges = {g: self.result.edges_by_net.get(g, 0) for g in group}
+                snap_count = self.result.routed_edges
+                baseline = len(self.result.failed)
                 for v in ripped:
                     rip_counts[v] = rip_counts.get(v, 0) + 1
                     self._rip_net(v)
@@ -913,6 +938,21 @@ class Router:
                     route_diff_pair(self, np_, nn_, gap)
                 for v in ripped:
                     self.route_net(self.board.nets[v])
+                if len(self.result.failed) > baseline:
+                    # worse than before the rip — exact rollback to the snapshot
+                    for g in group:
+                        self._rip_net(g)
+                    for t in snap_traces:
+                        self.result.traces.append(t)
+                        self.ws.add_trace(t.net, t.layer, t.coords, t.width)
+                    for v in snap_vias:
+                        self.result.vias.append(v)
+                        self.ws.add_via(v.net, v.x, v.y, v.diameter)
+                    self.result.failed = snap_failed
+                    for g, c in snap_edges.items():
+                        if c:
+                            self.result.edges_by_net[g] = c
+                    self.result.routed_edges = snap_count
                 after = {
                     tuple(f[1:]) for f in self.result.failed if f[0] == net_name
                 }

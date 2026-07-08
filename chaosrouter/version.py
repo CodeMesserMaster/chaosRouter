@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.33"
+__version__ = "0.2.34"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,21 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.34",
+        "2026-07-08",
+        [
+            "Router no longer ABANDONS routable nets. Three fixes, X500_r4 "
+            "29->12 failed (95.8%->98.3%): (1) _anypath last resort is finally "
+            "WIRED into the tail — whatever still fails gets to take ANY route "
+            "through the whole board, any layers, as many vias as needed (it "
+            "existed but was never called); recovered ~9 nets. (2) rip-up is "
+            "STRICT-NON-WORSENING: a rip that displaces more nets than it fixes "
+            "is rolled back, so the tail keeps the best state instead of "
+            "climbing 21->24 and keeping 24 (recovered 3). (3) fanout escapes "
+            "spread gently in width so onward routing has room.",
+        ],
+    ),
     (
         "0.2.33",
         "2026-07-08",
