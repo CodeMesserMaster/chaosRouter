@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.34"
+__version__ = "0.2.35"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,18 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.35",
+        "2026-07-08",
+        [
+            "Robust fanout: VIA-DOWN escape. When a dense-IC pin's top lane is "
+            "blocked, it drops to a free INNER layer (short stub + via) instead "
+            "of failing to escape — how a QFP/BGA pin clears a packed field. "
+            "Escape via + stub are fixed copper (Via.is_escape / add_via "
+            "kind=escape) so rip-up keeps them. X500_r4: 12->9 unrouted "
+            "(98.7%), escapes 109->119.",
+        ],
+    ),
     (
         "0.2.34",
         "2026-07-08",

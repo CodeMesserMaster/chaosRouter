@@ -124,6 +124,43 @@ def planned_fanout(router, escape_gap: float = 45.0, progress=None,
                     break
                 if placed:
                     break
+            if not placed:
+                # VIA-DOWN escape: the top lane is jammed, so drop to a free
+                # INNER layer (the free-space map shows inner layers wide open).
+                # Short stub to a clear via site, via down, breakout on the inner
+                # layer — how a QFP/BGA pin escapes a packed field. Escape via +
+                # stub are fixed copper (rip-up keeps them).
+                from .router import Via
+
+                vname, vdia = router.via_for(net)
+                inners = [
+                    l for l in ws.layers if l not in (ws.layers[0], ws.layers[-1])
+                ]
+                blayer = inners[0] if inners else layer
+                for vd in (13, 18, 24, 32, 42, 55):
+                    for a in (0, 45, 90, 135, 180, 225, 270, 315):
+                        bx = p.x + vd * math.cos(math.radians(a))
+                        by = p.y + vd * math.sin(math.radians(a))
+                        if not ws.exact_via_ok(p.net, bx, by, vdia, clr):
+                            continue
+                        stub = [(p.x, p.y), (bx, by)]
+                        if not ws.exact_trace_ok(p.net, layer, stub, w, clr):
+                            continue
+                        with router._result_lock:
+                            router.result.traces.append(
+                                Trace(p.net, layer, stub, w, is_escape=True)
+                            )
+                            router.result.vias.append(
+                                Via(p.net, bx, by, vdia, padstack=vname, is_escape=True)
+                            )
+                        ws.add_trace(p.net, layer, stub, w, kind="escape")
+                        ws.add_via(p.net, bx, by, vdia, kind="escape")
+                        router._escape[p.pin_id] = (bx, by, blayer)
+                        n_esc += 1
+                        placed = True
+                        break
+                    if placed:
+                        break
         if progress:
             progress(0, 0, f"fanout {ref}: escaped", router.result)
     return n_esc

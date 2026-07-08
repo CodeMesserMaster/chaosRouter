@@ -281,7 +281,10 @@ class Workspace:
             self._trees_dirty = True
             self._patch_exempt(net, geom, [layer])
 
-    def add_via(self, net: str, x: float, y: float, diameter: float):
+    def add_via(self, net: str, x: float, y: float, diameter: float, kind: str = "via"):
+        # kind="escape" tags a fanout via-down: fixed copper remove_net_wiring
+        # must NOT rip, so a fanned-out pin's via-down to a free inner layer
+        # stays put through rip-up.
         if self.on_add:
             self.on_add("via", net, x, y, diameter)
         pt = Point(x, y)
@@ -295,7 +298,7 @@ class Workspace:
                 sel = (grid[iys, ixs] == FREE) | (grid[iys, ixs] == nid)
                 grid[iys[sel], ixs[sel]] = nid
                 self.wiring_owner[layer][iys, ixs] = nid
-                self.copper[layer].append((net, geom, clr, "via", pt, diameter / 2))
+                self.copper[layer].append((net, geom, clr, kind, pt, diameter / 2))
                 self.fast.add_circle(layer, x, y, diameter / 2, clr, net)
             self._trees_dirty = True
             self._patch_exempt(net, geom, self.layers)

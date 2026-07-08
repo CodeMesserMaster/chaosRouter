@@ -39,6 +39,7 @@ class Via:
     y: float
     diameter: float
     padstack: str = "Default"
+    is_escape: bool = False  # dense-part fanout via-down: fixed, rip-up keeps it
 
 
 @dataclass
@@ -978,7 +979,10 @@ class Router:
                 t for t in self.result.traces
                 if t.net != net_name or getattr(t, "is_escape", False)
             ]
-            self.result.vias = [v for v in self.result.vias if v.net != net_name]
+            self.result.vias = [
+                v for v in self.result.vias
+                if v.net != net_name or getattr(v, "is_escape", False)
+            ]
             self.result.failed = [f for f in self.result.failed if f[0] != net_name]
             self.result.routed_edges -= self.result.edges_by_net.pop(net_name, 0)
         self.ws.remove_net_wiring(net_name)
