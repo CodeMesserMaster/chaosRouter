@@ -128,7 +128,7 @@ class Router:
 
     def route_all(
         self, progress=None, rip_up: bool = True, workers: int | None = None,
-        persist_seconds: float = 0.0,
+        persist_seconds: float = 0.0, draft: bool = False,
     ) -> RouteResult:
         import os
 
@@ -168,25 +168,32 @@ class Router:
             # lose their good edges on a failed re-route).
             import time as _t
 
-            self._deadline = _t.time() + self.TAIL_BUDGET
+            # DRAFT mode (fast iterate loop): first pass + ONE short rip-up
+            # round only — skip the shake/endgame/any-path tail. Gives the
+            # problem map (red ratsnest) in ~a minute so the user can move
+            # parts and reroute, instead of waiting for the full cleanup.
+            self._deadline = _t.time() + (self.DRAFT_BUDGET if draft else self.TAIL_BUDGET)
             try:
                 self._rip_and_retry(progress)
-                if self.result.failed and _t.time() < self._deadline:
-                    self._shake_parallel(progress)   # parallel across cores
-                if self.result.failed and _t.time() < self._deadline:
-                    self._endgame(progress)
-                if self.result.failed and _t.time() < self._deadline:
-                    self._shake_parallel(progress)
-                # ANY-PATH last resort: whatever still fails gets to take ANY
-                # route through the WHOLE board, any layers, as many vias as
-                # needed (drops grain/layer constraints, near-free vias). The
-                # router must never abandon a routable net just because the
-                # direct path is blocked — a winding many-via path is fine.
-                if self.result.failed:
-                    self._deadline = _t.time() + self.ANYPATH_BUDGET
-                    self._anypath(progress)
+                if not draft:
+                    if self.result.failed and _t.time() < self._deadline:
+                        self._shake_parallel(progress)   # parallel across cores
+                    if self.result.failed and _t.time() < self._deadline:
+                        self._endgame(progress)
+                    if self.result.failed and _t.time() < self._deadline:
+                        self._shake_parallel(progress)
+                    # ANY-PATH last resort: whatever still fails gets to take
+                    # ANY route through the WHOLE board, any layers, as many
+                    # vias as needed (drops grain/layer constraints, near-free
+                    # vias). Never abandon a routable net for a blocked direct
+                    # path — a winding many-via path is fine.
+                    if self.result.failed:
+                        self._deadline = _t.time() + self.ANYPATH_BUDGET
+                        self._anypath(progress)
             finally:
                 self._deadline = None
+            if draft:
+                return self.result
             # persistence: the board is routable — keep rolling fresh seeds
             # through shake+endgame until complete or the budget runs out
             t0 = _t.time()
@@ -465,6 +472,8 @@ class Router:
     #                      move loop fast; the tail is low-yield past this.
     ANYPATH_BUDGET = 120.0  # extra budget (s) for the any-route/any-via last
     #                         resort — it must never abandon a routable net.
+    DRAFT_BUDGET = 30.0  # draft-mode tail cap (s): one short rip-up round for a
+    #                      fast problem map in the route/inspect/move loop.
 
     def _finish_edge(self, net: Net, pad, near_pad) -> bool:
         """Surgically route ONE missing pad into the net's existing tree

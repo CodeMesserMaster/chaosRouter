@@ -1,7 +1,7 @@
 """chaosRouter version, history and update-check endpoint."""
 
 APP_NAME = "chaosRouter"
-__version__ = "0.2.35"
+__version__ = "0.2.36"
 
 # Update check: the GitHub latest-release API (zero infrastructure).
 # The GUI treats a failed lookup as "no update info", never as an error.
@@ -11,6 +11,17 @@ UPDATE_URL = (
 
 # (version, date, [notes]) — newest first
 HISTORY = [
+    (
+        "0.2.36",
+        "2026-07-09",
+        [
+            "DRAFT MODE for the place/route/move loop: first pass + one rip-up "
+            "round, skipping the shake/endgame/any-path cleanup tail. ~4x "
+            "faster (X500_r4 320s->77s) for a quick red-ratsnest problem map; "
+            "iterate placement on drafts, run the full route once at the end. "
+            "GUI 'Draft (fast problem map)' checkbox + CLI --draft.",
+        ],
+    ),
     (
         "0.2.35",
         "2026-07-08",

@@ -607,6 +607,18 @@ class Main(QMainWindow):
         )
         pl.addSpacing(6)
         pl.addWidget(self.strict_chk)
+        self.draft_chk = QCheckBox("Draft (fast problem map)")
+        self.draft_chk.setChecked(
+            str(self.settings.value("draft", "false")).lower() == "true"
+        )
+        self.draft_chk.setToolTip(
+            "Draft mode: first pass + one rip-up round, skipping the cleanup "
+            "tail (~4x faster). Use it to iterate placement — route, see the "
+            "red ratsnest, move parts, reroute — then turn off for the final "
+            "full route."
+        )
+        pl.addSpacing(4)
+        pl.addWidget(self.draft_chk)
 
         pl.addSpacing(16)
         self.go = QPushButton("ROUTE")
@@ -716,6 +728,8 @@ class Main(QMainWindow):
         ]
         if self.strict_chk.isChecked():
             args.append("--strict-width")
+        if self.draft_chk.isChecked():
+            args.append("--draft")
         method = self._methods[self.method_combo.currentIndex()]
         if method != "chaos":
             args += ["--method", method]
@@ -739,6 +753,7 @@ class Main(QMainWindow):
         self.settings.setValue("step", self.step_spin.value())
         self.settings.setValue("fillet", self.fillet_spin.value())
         self.settings.setValue("strict", self.strict_chk.isChecked())
+        self.settings.setValue("draft", self.draft_chk.isChecked())
         self.settings.setValue(
             "method", self._methods[self.method_combo.currentIndex()]
         )

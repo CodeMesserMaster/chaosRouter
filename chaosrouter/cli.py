@@ -36,6 +36,11 @@ def main():
     )
     ap.add_argument("--stream", action="store_true", help="emit live copper events")
     ap.add_argument(
+        "--draft", action="store_true",
+        help="draft mode: first pass + one rip-up round, skip the cleanup tail "
+             "(~4x faster) — a quick problem map for the place/route/move loop",
+    )
+    ap.add_argument(
         "--strict-width", action="store_true",
         help="never route below class width (DipTrace-safe: its SES import "
              "normalizes widths back to the class width)",
@@ -99,6 +104,7 @@ def main():
         via_map=dict(m.split("=", 1) for m in args.via_map),
         persist_seconds=args.persist_min * 60.0,
         curve_method=args.curves,
+        draft=args.draft,
         avoid_padstacks=tuple(args.avoid_via) if args.avoid_via else (),
         include_geometry=bool(args.stats_json),
     )

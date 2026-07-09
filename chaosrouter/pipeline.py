@@ -30,6 +30,7 @@ def run_pipeline(
     via_map: dict | None = None,
     persist_seconds: float = 0.0,
     curve_method: str = "fillet",
+    draft: bool = False,
 ) -> dict:
     """Route a DSN end to end. `progress(line: str)` receives log lines;
     `on_add`/`on_rip` receive live copper events (for GUI animation).
@@ -138,7 +139,7 @@ def run_pipeline(
             # 2-layer board: Top = East-West, Bottom = North-South
             router._grain = {sig[0]: 0, sig[-1]: 1}
             router._grain_pen = 25.0
-        result = router.route_all(progress=rp)
+        result = router.route_all(progress=rp, draft=draft)
     elif method == "manhattan-fanout":
         # EXPERIMENTAL: Manhattan + PLANNED FANOUT. Order: diff pairs ->
         # coordinated escape bundles for fine-pitch ICs (each pin escaped out
@@ -174,7 +175,9 @@ def run_pipeline(
             router._shake_parallel(rp)
         result = router.result
     else:
-        result = router.route_all(progress=rp, persist_seconds=persist_seconds)
+        result = router.route_all(
+            progress=rp, persist_seconds=persist_seconds, draft=draft
+        )
     t_route = time.time() - t0
     say(
         f"routing done: {result.routed_edges} connections, "
